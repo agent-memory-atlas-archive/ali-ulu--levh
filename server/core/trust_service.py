@@ -162,13 +162,31 @@ class TrustService:
         memory = await self.episodic.get(memory_id)
         if not memory:
             return None
+
+        # On-demand fallback: build the corroboration neighbourhood from the
+        # persisted entity graph instead of embedding the whole corpus into an
+        # in-memory index. A memory's trust only depends on the other memories
+        # that share its entities, so a targeted query is exact and cheap.
         now_iso = datetime.now(timezone.utc).isoformat()
-        memories = await self.episodic.search(limit=1_000_000)
-        entity_index = self.entity_index.build_entity_index(memories)
+        corrob_index: dict[str, list[tuple[str, str]]] = {}
+        neighbour_ids: set[str] = set()
+        for entity_id in self.entity_index.entity_ids_for(memory):
+            linked = await self.db.entity_memory_ids(entity_id, limit=1000)
+            for linked_id in linked:
+                if linked_id != memory.id:
+                    neighbour_ids.add(linked_id)
+        for linked_id in neighbour_ids:
+            linked_memory = await self.episodic.get(linked_id)
+            if linked_memory:
+                for eid in self.entity_index.entity_ids_for(linked_memory):
+                    corrob_index.setdefault(eid, []).append(
+                        (linked_id, trust.source_type(linked_memory.source))
+                    )
+
         conflict_map = await self._conflict_status_map()
         breakdown = self._trust_breakdown(
             memory,
-            entity_index,
+            corrob_index,
             now_iso,
             conflict_map.get(memory_id),
         )

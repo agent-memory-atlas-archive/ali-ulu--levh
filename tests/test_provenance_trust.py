@@ -411,3 +411,40 @@ async def test_trust_mcp_tools_flow(engine):
     )
     text = _tool_text(result)
     assert "low-trust" in text.lower() or mem.id[:8] in text
+# ── 10. get_trust fallback matches full-corpus recompute ─────────────
+
+
+@pytest.mark.asyncio
+async def test_get_trust_fallback_matches_recompute(engine):
+    """On a memory without a stored trust row, the on-demand compute must
+    agree with a full recompute. It builds corroboration only from entity
+    graph neighbours, so unrelated memories must not move the score."""
+    a = await engine.store(
+        content="Erin reviewed the levh billing migration and approved it.",
+        memory_type="episodic",
+        source="dashboard",
+        metadata={"from": "erin@acme.com"},
+    )
+    await engine.store(
+        content="Billing migration for levh shipped out of band.",
+        memory_type="episodic",
+        source="connector:email",
+        metadata={"from": "ops@acme.com"},
+    )
+    await engine.store(
+        content="Completely unrelated note about the cafeteria menu.",
+        memory_type="episodic",
+        source="connector:slack",
+    )
+
+    # Fallback path: `a` has no stored trust row yet (no recompute called).
+    fallback = await engine.get_trust(a.id)
+    assert fallback is not None
+
+    await engine.recompute_trust_scores()
+    recomputed = await engine.get_trust(a.id)
+
+    assert fallback["confidence"] == recomputed["confidence"]
+    assert fallback["evidence"]["distinct_source_types"] == recomputed[
+        "evidence"
+    ]["distinct_source_types"]

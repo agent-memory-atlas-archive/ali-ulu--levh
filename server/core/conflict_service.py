@@ -120,7 +120,8 @@ class ConflictService:
                 new_count += 1
 
         stale_pruned = 0
-        for existing in await self.db.list_conflicts(status="open", limit=100000):
+        open_conflicts = await self.db.list_conflicts(status="open", limit=100000)
+        for existing in open_conflicts:
             # Attachment candidates (memory_id_a == memory_id_b) come from
             # verify_attachment, not this pairwise entity-overlap sweep — they
             # are never in current_candidate_ids and would otherwise be wiped
@@ -132,9 +133,7 @@ class ConflictService:
                     stale_pruned += 1
         await self.db.commit()
 
-        open_total = len(
-            await self.db.list_conflicts(status="open", limit=100000)
-        )
+        open_total = len(open_conflicts)
         self._emit("conflicts_detected", {"new": new_count, "open": open_total})
         return {
             "new_candidates": new_count,

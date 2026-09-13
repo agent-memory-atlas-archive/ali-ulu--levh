@@ -51,6 +51,34 @@ jobs:
         if: matrix.python-version == '3.12'
         run: twine check dist/*
 
+  # The suite must survive a machine that steers it at a real memory store.
+  # On 2026-09-13 a developer-level LEVH_SQLITE_DB_PATH made subprocess tests
+  # write fixture rows into the real database while CI stayed green, because
+  # Actions machines have no such variable. This job plants a decoy pointing at
+  # a canary database and runs the full suite against it: any leak now fails
+  # loudly here instead of silently writing to production memory on Windows.
+  hostile-env:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Plant the decoy store-steering variables
+        run: |
+          echo "LEVH_SQLITE_DB_PATH=${{ github.workspace }}/canary/stackmemory.db" >> "$GITHUB_ENV"
+          echo "SQLITE_DB_PATH=${{ github.workspace }}/canary/stackmemory.db" >> "$GITHUB_ENV"
+          echo "STACKMEMORY_SQLITE_DB_PATH=${{ github.workspace }}/canary/stackmemory.db" >> "$GITHUB_ENV"
+          echo "LEVH_CONFIG_PATH=${{ github.workspace }}/canary/config.json" >> "$GITHUB_ENV"
+      - name: Test against the canary
+        env:
+          EMBEDDER_MODE: hash
+        run: python -m pytest -q
+
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

@@ -278,6 +278,7 @@ def test_the_hook_never_fails_the_session(project):
     assert result.stdout.strip() == ""
 
 
+@needs_shell
 @pytest.mark.asyncio
 async def test_the_session_starts_knowing_the_rules_and_the_pins(project):
     """The end-to-end promise: a new session already knows what it was told."""

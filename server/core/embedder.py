@@ -112,15 +112,6 @@ class Embedder:
             return self.hash_embed(text, self.dimension)
         return self._local_embed(text)
 
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        if self.mode == "openai":
-            return await self._openai_embed_batch(texts)
-        if self.mode == "ollama":
-            return [await self._ollama_embed(t) for t in texts]
-        if self.mode == "hash":
-            return [self.hash_embed(t, self.dimension) for t in texts]
-        return self._local_embed_batch(texts)
-
     # ── OpenAI ────────────────────────────────────────────────────
 
     async def _openai_post(self, payload: dict, timeout: float) -> dict:
@@ -158,12 +149,6 @@ class Embedder:
         )
         return data["data"][0]["embedding"]
 
-    async def _openai_embed_batch(self, texts: list[str]) -> list[list[float]]:
-        data = await self._openai_post(
-            {"model": "text-embedding-3-small", "input": texts}, timeout=60.0
-        )
-        return [d["embedding"] for d in data["data"]]
-
     # ── Ollama (fully local, zero API cost) ──────────────────────
 
     async def _ollama_embed(self, text: str) -> list[float]:
@@ -189,10 +174,6 @@ class Embedder:
     def _local_embed(self, text: str) -> list[float]:
         vec = self._model.encode(text, convert_to_numpy=True)
         return vec.tolist()
-
-    def _local_embed_batch(self, texts: list[str]) -> list[list[float]]:
-        vecs = self._model.encode(texts, convert_to_numpy=True)
-        return [v.tolist() for v in vecs]
 
     # ── Fallback: deterministic hash embedding (no model needed) ─
 

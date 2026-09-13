@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 # `memory_engine` need it, and the guard imports the engine — defining it in
 # either of those would make the import cycle.
 RULE_TAG = "levh-rule"
+DECISION_TAG = "levh-decision"
+BLOCKER_TAG = "levh-blocker"
 
 
 # `Enum.__str__`/`__format__` print "ClassName.MEMBER" even for a `(str, Enum)`

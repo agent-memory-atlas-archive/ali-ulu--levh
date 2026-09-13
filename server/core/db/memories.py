@@ -144,12 +144,6 @@ class MemoryQueries:
         await self.conn.commit()
         return cursor.rowcount > 0
 
-    async def clear_all_memories(self) -> int:
-        """Delete every memory. Used by a replace-mode restore."""
-        cursor = await self.conn.execute("DELETE FROM memories")
-        await self.conn.commit()
-        return cursor.rowcount
-
     async def delete_memory_cascade(self, memory_id: str) -> bool:
         """Delete a memory and every derived row that references it.
 

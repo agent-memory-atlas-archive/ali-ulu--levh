@@ -16,12 +16,6 @@ import aiosqlite
 class SessionQueries:
     """Session rows and connector sync bookkeeping."""
 
-    async def clear_all_sessions(self) -> int:
-        """Delete every session. Used by a replace-mode restore."""
-        cursor = await self.conn.execute("DELETE FROM sessions")
-        await self.conn.commit()
-        return cursor.rowcount
-
     async def delete_session(self, session_id: str) -> bool:
         """Delete one session row. Whatever referenced it is the caller's to
         settle first — see :meth:`MemorySessionsMixin.delete_session`, which
@@ -117,14 +111,6 @@ class SessionQueries:
         raw = d.get("metadata")
         d["metadata"] = json.loads(raw) if raw else {}
         return d
-
-    async def get_sync_state(self, source_key: str) -> Optional[dict]:
-        cursor = await self.conn.execute(
-            "SELECT * FROM connector_sync WHERE source_key = ?", (source_key,)
-        )
-        row = await cursor.fetchone()
-        await cursor.close()
-        return dict(row) if row else None
 
     async def list_sync_states(self) -> list[dict]:
         cursor = await self.conn.execute(

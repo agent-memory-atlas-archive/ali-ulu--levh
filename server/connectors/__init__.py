@@ -75,8 +75,3 @@ def list_connectors() -> list[dict]:
             "required_config_keys": instance.required_config_keys(),
         })
     return result
-
-
-def get_registry() -> dict[str, type["BaseConnector"]]:
-    """Public accessor for the connector registry (name → class)."""
-    return _ensure_registry()

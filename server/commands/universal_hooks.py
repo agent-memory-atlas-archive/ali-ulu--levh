@@ -159,11 +159,6 @@ def _resolved_db_path() -> str:
     return os.path.abspath(os.getenv("SQLITE_DB_PATH", "./stackmemory.db"))
 
 
-def _levh_url() -> str:
-    """LEVH server URL."""
-    return os.getenv("LEVH_URL", "http://localhost:8000")
-
-
 # ── Installers ───────────────────────────────────────────────────────
 
 def install_claude_code_hook(limit: int = 5, with_checkpoint: bool = False) -> dict:

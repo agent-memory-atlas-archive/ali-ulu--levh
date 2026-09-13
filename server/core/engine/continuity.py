@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from ..types import RULE_TAG
+from ..types import RULE_TAG, DECISION_TAG, BLOCKER_TAG
 from ..types import (
     Memory,
 )
@@ -154,10 +154,6 @@ class MemoryContinuityMixin:
 
         sessions = sessions[:limit]
 
-        # Filter memories by session if we have sessions
-        session_ids = {s.id for s in sessions}
-        session_memories = [m for m in recent_memories if m.session_id in session_ids]
-
         # Also get git-hook memories (commits) for the project
         commit_memories = [m for m in recent_memories if m.source == "git-hook"]
         if project:
@@ -244,9 +240,14 @@ class MemoryContinuityMixin:
                         lines.append(f"  - {f}")
             lines.append("")
 
-        # Decisions from recent memories
+        # Decisions from recent memories. Explicit `levh-decision` tags are
+        # authoritative (they survive regardless of wording); the keyword list
+        # below remains only as a fallback for older, untagged memories.
         decisions = []
         for m in recent_memories[:30]:
+            if DECISION_TAG in (m.tags or []):
+                decisions.append(m)
+                continue
             content_lower = m.content.lower()
             if any(kw in content_lower for kw in ["decided", "agreed", "karar", "seçtik", "we'll", "will use", "switching to"]):
                 decisions.append(m)
@@ -257,9 +258,13 @@ class MemoryContinuityMixin:
                 lines.append(f"  - {snippet}...")
             lines.append("")
 
-        # Blockers / errors / TODOs
+        # Blockers / errors / TODOs. Explicit `levh-blocker` tags are
+        # authoritative; keywords remain a fallback for older memories.
         blockers = []
         for m in recent_memories[:30]:
+            if BLOCKER_TAG in (m.tags or []):
+                blockers.append(m)
+                continue
             content_lower = m.content.lower()
             if any(kw in content_lower for kw in ["error", "failed", "blocked", "todo", "fixme", "hata", "başarısız", "takıldı"]):
                 blockers.append(m)

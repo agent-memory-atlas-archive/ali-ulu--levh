@@ -9,8 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from functools import wraps
-from typing import Any, Callable
+from typing import Any
 
 from .env import get_env
 
@@ -35,11 +34,6 @@ def set_agent_session(session_id: str) -> None:
 def get_agent_session() -> str | None:
     """Get the current agent session ID."""
     return _agent_session_id
-
-
-def auto_heartbeat_enabled() -> bool:
-    """Check if auto-heartbeat is enabled."""
-    return _AUTO_HEARTBEAT_ENABLED
 
 
 async def _heartbeat_loop() -> None:
@@ -78,25 +72,6 @@ def stop_heartbeat_background() -> None:
     if _heartbeat_task and not _heartbeat_task.done():
         _heartbeat_task.cancel()
         _heartbeat_task = None
-
-
-def with_auto_heartbeat(func: Callable) -> Callable:
-    """Decorator that sends a heartbeat before/after a tool call."""
-    @wraps(func)
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        # Send heartbeat on call (throttled to once per interval)
-        if _agent_session_id and _AUTO_HEARTBEAT_ENABLED:
-            now = time.time()
-            if now - _last_heartbeat > _heartbeat_interval:
-                try:
-                    from . import engine_provider
-                    engine = engine_provider.get_engine()
-                    if engine.agent_tracker:
-                        await engine.agent_tracker.heartbeat(_agent_session_id)
-                except Exception:
-                    pass  # Best-effort
-        return await func(*args, **kwargs)
-    return wrapper
 
 
 # ── Smart Auto-Connect ───────────────────────────────────────────────

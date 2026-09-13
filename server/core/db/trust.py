@@ -215,13 +215,3 @@ class TrustQueries:
         )
         await self.conn.commit()
         return cursor.rowcount
-
-    async def conflicts_for_memory(self, memory_id: str) -> list[dict]:
-        cursor = await self.conn.execute(
-            "SELECT * FROM memory_conflict_candidates "
-            "WHERE memory_id_a = ? OR memory_id_b = ?",
-            (memory_id, memory_id),
-        )
-        rows = await cursor.fetchall()
-        await cursor.close()
-        return [dict(r) for r in rows]

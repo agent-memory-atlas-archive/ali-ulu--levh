@@ -98,10 +98,6 @@ class MemoryLifecycleMixin:
         if listener not in self._listeners:
             self._listeners.append(listener)
 
-    def unsubscribe(self, listener: EventListener) -> None:
-        if listener in self._listeners:
-            self._listeners.remove(listener)
-
     def _emit(self, event: str, payload: dict) -> None:
         for listener in list(self._listeners):
             try:

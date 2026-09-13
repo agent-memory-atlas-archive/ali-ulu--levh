@@ -9,12 +9,6 @@ the split verifiable.
 from __future__ import annotations
 
 
-from ..entity_index_service import EntityIndexService
-from ..types import (
-    Memory,
-)
-
-
 class MemoryGraphMixin:
     """Entity graph, trust and conflict candidates — thin delegates to the services."""
 
@@ -45,11 +39,6 @@ class MemoryGraphMixin:
         """Counts of persisted entities by type."""
         await self._ensure_derived_state()
         return await self.entity_index.entity_graph_stats()
-
-    @staticmethod
-    def _build_entity_index(memories: list[Memory]) -> dict[str, list[tuple[str, str]]]:
-        """entity_id → list of (memory_id, source_type) across all memories."""
-        return EntityIndexService.build_entity_index(memories)
 
     async def recompute_trust_scores(self) -> dict:
         """Compute and persist the provenance/trust score for every memory.

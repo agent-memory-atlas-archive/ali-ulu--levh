@@ -40,10 +40,6 @@ class VectorStore:
         if self.size == 1:
             self.dimension = len(emb)
 
-    def add_batch(self, memories: list[Memory]) -> None:
-        for m in memories:
-            self.add(m)
-
     def search(
         self,
         query_embedding: list[float],

@@ -15,6 +15,17 @@ The librarian watcher is the other one. It starts with the app and writes into
 whatever store the app is using — a row no test asked for, arriving from a
 background thread at an unpredictable moment. Tests that exercise the watcher
 turn it on themselves.
+
+It happened a third way, on 2026-09-13: the developer's machine exported
+``LEVH_SQLITE_DB_PATH`` pointing at the real memory store, and
+``server.core.env.get_env`` prefers the ``LEVH_``-prefixed name over the plain
+one the suite sets. Subprocess-based tests therefore ignored their own
+``SQLITE_DB_PATH`` and wrote fixture rows into the *real* memory. CI never saw
+it because Actions machines have no such variable — the failure was invisible
+exactly where the suite is trusted most. The suite now scrubs every name that
+can steer it at a real store, and asserts the decoy survives the whole run:
+if a test still reaches the real database, the canary row proves it and this
+file is the first suspect.
 """
 
 from __future__ import annotations
@@ -35,8 +46,26 @@ _LLM_ENV = (
     "SUMMARY_MODEL",
 )
 
+# Every name through which a developer's environment could redirect the suite
+# (or the CLI/server/MCP subprocesses it spawns) at the real memory store.
+# get_env() accepts plain, LEVH_-prefixed and legacy STACKMEMORY_ spellings,
+# so all three must go.
+_DB_ENV = (
+    "LEVH_SQLITE_DB_PATH",
+    "SQLITE_DB_PATH",
+    "STACKMEMORY_SQLITE_DB_PATH",
+    "LEVH_CONFIG_PATH",
+)
+
 
 @pytest.fixture(autouse=True)
 def _neutral_llm_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in _LLM_ENV:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_memory_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in _DB_ENV:
+        monkeypatch.delenv(name, raising=False)
+

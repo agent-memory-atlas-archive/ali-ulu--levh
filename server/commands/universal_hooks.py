@@ -197,12 +197,12 @@ def install_cursor_hook(limit: int = 5) -> dict:
 
     # Also create .cursorrules with continuity brief
     rules_path = Path(".cursorrules")
-    _write_cursorrules(rules_path)
+    _write_cursorrules(rules_path, limit)
 
     return {"ok": True, "agent": "cursor", "config_path": str(config_path)}
 
 
-def install_vscode_hook(limit: int = 5) -> dict:
+def install_vscode_hook() -> dict:
     """Install auto-connect for VS Code (Cline extension)."""
     config_path = Path(".vscode/mcp.json")
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -232,7 +232,7 @@ def install_vscode_hook(limit: int = 5) -> dict:
     return {"ok": True, "agent": "vscode", "config_path": str(config_path)}
 
 
-def install_windsurf_hook(limit: int = 5) -> dict:
+def install_windsurf_hook() -> dict:
     """Install auto-connect for Windsurf."""
     config_path = Path(".windsurf/mcp.json")
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -262,7 +262,7 @@ def install_windsurf_hook(limit: int = 5) -> dict:
     return {"ok": True, "agent": "windsurf", "config_path": str(config_path)}
 
 
-def install_claude_desktop_hook(limit: int = 5) -> dict:
+def install_claude_desktop_hook() -> dict:
     """Install auto-connect for Claude Desktop."""
     # Claude Desktop config is in OS-specific location
     # We generate it in the project root for the user to copy
@@ -289,13 +289,13 @@ def install_claude_desktop_hook(limit: int = 5) -> dict:
     }
 
 
-def _write_cursorrules(path: Path) -> None:
+def _write_cursorrules(path: Path, limit: int = 5) -> None:
     """Write .cursorrules with LEVH continuity brief instructions."""
-    content = """# LEVH Memory Integration
+    content = f"""# LEVH Memory Integration
 
 When starting a new session in this project, run this command to load your memory:
 ```
-levh continue --limit 5 --if-any
+levh continue --limit {limit} --if-any
 ```
 
 This will show you:
@@ -345,11 +345,11 @@ def install_universal_hook(
             elif agent == "cursor":
                 results[agent] = install_cursor_hook(limit)
             elif agent == "vscode":
-                results[agent] = install_vscode_hook(limit)
+                results[agent] = install_vscode_hook()
             elif agent == "windsurf":
-                results[agent] = install_windsurf_hook(limit)
+                results[agent] = install_windsurf_hook()
             elif agent == "claude-desktop":
-                results[agent] = install_claude_desktop_hook(limit)
+                results[agent] = install_claude_desktop_hook()
             elif agent == "shell":
                 results[agent] = install_shell_hook(limit)
             else:

@@ -102,7 +102,6 @@ class MemoryPrivacyMixin:
 
         await self.episodic.update(memory)
         self._refresh_memory_caches(memory)
-        self.vector_store.add(memory)
         self._mark_derived_dirty()
         self._emit("updated", self._memory_event_payload(memory))
         return {

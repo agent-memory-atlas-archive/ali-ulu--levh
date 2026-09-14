@@ -170,71 +170,47 @@ def install_claude_code_hook(limit: int = 5, with_checkpoint: bool = False) -> d
 
 def install_cursor_hook(limit: int = 5) -> dict:
     """Install auto-connect for Cursor IDE."""
-    config_path = Path(".cursor/mcp.json")
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    entry = {
-        "command": "levh",
-        "args": ["mcp", "stdio"],
-        "cwd": os.getcwd(),
-        "env": {
-            "LEVH_MCP_PROFILE": "work",
-            "SQLITE_DB_PATH": _resolved_db_path(),
-        },
-    }
-
-    if config_path.exists():
-        try:
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            config = {}
-    else:
-        config = {}
-
-    servers = config.setdefault("mcpServers", {})
-    servers["levh"] = entry
-    config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-
-    # Also create .cursorrules with continuity brief
-    rules_path = Path(".cursorrules")
-    _write_cursorrules(rules_path, limit)
-
-    return {"ok": True, "agent": "cursor", "config_path": str(config_path)}
+    result = _install_mcp_json_entry(Path(".cursor/mcp.json"))
+    # Cursor also gets a .cursorrules continuity brief.
+    _write_cursorrules(Path(".cursorrules"), limit)
+    return {**result, "agent": "cursor"}
 
 
 def install_vscode_hook() -> dict:
     """Install auto-connect for VS Code (Cline extension)."""
-    config_path = Path(".vscode/mcp.json")
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    entry = {
-        "command": "levh",
-        "args": ["mcp", "stdio"],
-        "cwd": os.getcwd(),
-        "env": {
-            "LEVH_MCP_PROFILE": "work",
-            "SQLITE_DB_PATH": _resolved_db_path(),
-        },
-    }
-
-    if config_path.exists():
-        try:
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            config = {}
-    else:
-        config = {}
-
-    servers = config.setdefault("mcpServers", {})
-    servers["levh"] = entry
-    config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-
-    return {"ok": True, "agent": "vscode", "config_path": str(config_path)}
+    return {**_install_mcp_json_entry(Path(".vscode/mcp.json")), "agent": "vscode"}
 
 
 def install_windsurf_hook() -> dict:
     """Install auto-connect for Windsurf."""
-    config_path = Path(".windsurf/mcp.json")
+    return {**_install_mcp_json_entry(Path(".windsurf/mcp.json")), "agent": "windsurf"}
+
+
+def install_claude_desktop_hook() -> dict:
+    """Install auto-connect for Claude Desktop.
+
+    The config is exported to the project root as ``claude_desktop_config_levh.json``;
+    the user copies it into Claude Desktop settings.
+    """
+    return {
+        **_install_mcp_json_entry(
+            Path("claude_desktop_config_levh.json"),
+            note="Copy this config to your Claude Desktop settings",
+        ),
+        "agent": "claude-desktop",
+    }
+
+
+# ── MCP JSON helpers (shared by the cursor/vscode/windsurf/claude-desktop
+# installers and uninstallers) ───────────────────────────────────────
+
+
+def _install_mcp_json_entry(config_path: Path, *, note: str | None = None) -> dict:
+    """Merge the LEVH MCP server entry into a client's ``mcp.json``.
+
+    Existing config is preserved (only the ``levh`` key under ``mcpServers`` is
+    upserted), so other MCP servers a user already configured survive.
+    """
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
     entry = {
@@ -255,38 +231,22 @@ def install_windsurf_hook() -> dict:
     else:
         config = {}
 
-    servers = config.setdefault("mcpServers", {})
-    servers["levh"] = entry
+    config.setdefault("mcpServers", {})["levh"] = entry
     config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
-    return {"ok": True, "agent": "windsurf", "config_path": str(config_path)}
+    result = {"ok": True, "config_path": str(config_path)}
+    if note:
+        result["note"] = note
+    return result
 
 
-def install_claude_desktop_hook() -> dict:
-    """Install auto-connect for Claude Desktop."""
-    # Claude Desktop config is in OS-specific location
-    # We generate it in the project root for the user to copy
-    config_path = Path("claude_desktop_config_levh.json")
-
-    entry = {
-        "command": "levh",
-        "args": ["mcp", "stdio"],
-        "cwd": os.getcwd(),
-        "env": {
-            "LEVH_MCP_PROFILE": "work",
-            "SQLITE_DB_PATH": _resolved_db_path(),
-        },
-    }
-
-    config = {"mcpServers": {"levh": entry}}
+def _uninstall_mcp_json_entry(config_path: Path) -> None:
+    """Remove only the LEVH MCP server entry from a client's ``mcp.json``."""
+    if not config_path.exists():
+        return
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config.get("mcpServers", {}).pop("levh", None)
     config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-
-    return {
-        "ok": True,
-        "agent": "claude-desktop",
-        "config_path": str(config_path),
-        "note": "Copy this config to your Claude Desktop settings",
-    }
 
 
 def _write_cursorrules(path: Path, limit: int = 5) -> None:
@@ -458,26 +418,13 @@ def uninstall_universal_hook(client: str = "all") -> dict:
                 from .hooks import _uninstall_session_hook
                 result = _uninstall_session_hook()
                 results[agent] = {"ok": result == 0}
-            elif agent == "cursor":
-                config_path = Path(".cursor/mcp.json")
-                if config_path.exists():
-                    config = json.loads(config_path.read_text(encoding="utf-8"))
-                    config.get("mcpServers", {}).pop("levh", None)
-                    config_path.write_text(json.dumps(config, indent=2) + "\n")
-                results[agent] = {"ok": True}
-            elif agent == "vscode":
-                config_path = Path(".vscode/mcp.json")
-                if config_path.exists():
-                    config = json.loads(config_path.read_text(encoding="utf-8"))
-                    config.get("mcpServers", {}).pop("levh", None)
-                    config_path.write_text(json.dumps(config, indent=2) + "\n")
-                results[agent] = {"ok": True}
-            elif agent == "windsurf":
-                config_path = Path(".windsurf/mcp.json")
-                if config_path.exists():
-                    config = json.loads(config_path.read_text(encoding="utf-8"))
-                    config.get("mcpServers", {}).pop("levh", None)
-                    config_path.write_text(json.dumps(config, indent=2) + "\n")
+            elif agent in ("cursor", "vscode", "windsurf"):
+                config_path = {
+                    "cursor": ".cursor/mcp.json",
+                    "vscode": ".vscode/mcp.json",
+                    "windsurf": ".windsurf/mcp.json",
+                }[agent]
+                _uninstall_mcp_json_entry(Path(config_path))
                 results[agent] = {"ok": True}
             elif agent == "shell":
                 results[agent] = uninstall_shell_hook()

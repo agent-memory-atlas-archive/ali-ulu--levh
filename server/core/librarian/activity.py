@@ -11,7 +11,6 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from server.core.librarian.db import ro_conn
-from server.core.librarian.discovery import _ALL_AGENTS, describe_agent
 
 logger = logging.getLogger("levh.librarian")
 
@@ -39,7 +38,14 @@ def _silent_agents(per_source: dict) -> list[str]:
 
     Bağlı olmayan bir ajanın sessizliği haber değil — o zaten "levh MCP yok"
     bulgusunun konusu. Haber, bağlanmış ama kullanılmayan ajan.
+
+    ``describe_agent`` paket yüzeyinden (``server.core.librarian``) dinamik
+    çözümlenir: testler orayı yamalıyor ve yama gerçek kullanım noktasına
+    etki etmeli.
     """
+    from server.core.librarian import discovery as _discovery
+    from server.core import librarian as _pkg
+
     written = {
         _normalize_source(name)
         for name, count in per_source.items()
@@ -47,8 +53,8 @@ def _silent_agents(per_source: dict) -> list[str]:
     }
     return [
         agent
-        for agent in _ALL_AGENTS
-        if describe_agent(agent)["levh_connected"] and agent not in written
+        for agent in _discovery._ALL_AGENTS
+        if _pkg.describe_agent(agent)["levh_connected"] and agent not in written
     ]
 
 

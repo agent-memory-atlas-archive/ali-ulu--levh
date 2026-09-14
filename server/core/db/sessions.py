@@ -16,16 +16,19 @@ import aiosqlite
 class SessionQueries:
     """Session rows and connector sync bookkeeping."""
 
+    def __init__(self, db) -> None:
+        self._db = db
+
     async def delete_session(self, session_id: str) -> bool:
         """Delete one session row. Whatever referenced it is the caller's to
         settle first — see :meth:`MemorySessionsMixin.delete_session`, which
         does not call this while memories still point at the session."""
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "DELETE FROM sessions WHERE id = ?", (session_id,)
         )
         changed = cursor.rowcount
         await cursor.close()
-        await self.conn.commit()
+        await self._db.conn.commit()
         return bool(changed)
 
     async def detach_session_memories(self, session_id: str) -> int:
@@ -37,17 +40,17 @@ class SessionQueries:
         produced them. Detaching makes the unlinking explicit — the memory
         survives, only its provenance link is dropped.
         """
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "UPDATE memories SET session_id = NULL WHERE session_id = ?",
             (session_id,),
         )
         changed = cursor.rowcount
         await cursor.close()
-        await self.conn.commit()
+        await self._db.conn.commit()
         return int(changed)
 
     async def list_session_memory_ids(self, session_id: str) -> list[str]:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT id FROM memories WHERE session_id = ?", (session_id,)
         )
         rows = await cursor.fetchall()
@@ -55,7 +58,7 @@ class SessionQueries:
         return [r["id"] for r in rows]
 
     async def insert_session(self, session: dict) -> None:
-        await self.conn.execute(
+        await self._db.conn.execute(
             """
             INSERT OR REPLACE INTO sessions
                 (id, name, status, metadata, memory_count, created_at, ended_at)
@@ -64,16 +67,16 @@ class SessionQueries:
             """,
             {**session, "metadata": json.dumps(session.get("metadata", {}))},
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
 
     async def get_session(self, session_id: str) -> Optional[dict]:
-        cursor = await self.conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+        cursor = await self._db.conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
         row = await cursor.fetchone()
         await cursor.close()
         return self._row_to_session(row) if row else None
 
     async def get_all_sessions(self, limit: int = 100) -> list[dict]:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT * FROM sessions ORDER BY created_at DESC LIMIT ?", (limit,)
         )
         rows = await cursor.fetchall()
@@ -81,7 +84,7 @@ class SessionQueries:
         return [self._row_to_session(r) for r in rows]
 
     async def count_session_memories(self, session_id: str) -> int:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT COUNT(*) FROM memories WHERE session_id = ?", (session_id,)
         )
         row = await cursor.fetchone()
@@ -99,10 +102,10 @@ class SessionQueries:
         if not sets:
             return False
         params.append(session_id)
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             f"UPDATE sessions SET {', '.join(sets)} WHERE id = ?", params
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
         return cursor.rowcount > 0
 
     @staticmethod
@@ -113,7 +116,7 @@ class SessionQueries:
         return d
 
     async def list_sync_states(self) -> list[dict]:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT * FROM connector_sync ORDER BY last_synced_at DESC"
         )
         rows = await cursor.fetchall()
@@ -130,7 +133,7 @@ class SessionQueries:
         stored: int,
     ) -> None:
         """Upsert a connector's sync bookkeeping, accumulating totals/runs."""
-        await self.conn.execute(
+        await self._db.conn.execute(
             """
             INSERT INTO connector_sync
                 (source_key, connector, project, last_synced_at,
@@ -147,4 +150,4 @@ class SessionQueries:
             """,
             (source_key, connector, project, last_synced_at, fetched, stored, stored),
         )
-        await self.conn.commit()
+        await self._db.conn.commit()

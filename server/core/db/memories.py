@@ -16,8 +16,11 @@ import aiosqlite
 class MemoryQueries:
     """Memory rows: insert, search, update, delete and the residue audit."""
 
+    def __init__(self, db) -> None:
+        self._db = db
+
     async def insert_memory(self, memory: dict) -> None:
-        await self.conn.execute(
+        await self._db.conn.execute(
             """
             INSERT OR REPLACE INTO memories
                 (id, content, memory_type, embedding, importance, frequency,
@@ -36,16 +39,16 @@ class MemoryQueries:
                 "pinned": 1 if memory.get("pinned") else 0,
             },
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
 
     async def get_memory(self, memory_id: str) -> Optional[dict]:
-        cursor = await self.conn.execute("SELECT * FROM memories WHERE id = ?", (memory_id,))
+        cursor = await self._db.conn.execute("SELECT * FROM memories WHERE id = ?", (memory_id,))
         row = await cursor.fetchone()
         await cursor.close()
         return self._row_to_memory(row) if row else None
 
     async def get_all_memories(self, limit: int = 10000) -> list[dict]:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT * FROM memories ORDER BY created_at DESC LIMIT ?", (limit,)
         )
         rows = await cursor.fetchall()
@@ -65,8 +68,8 @@ class MemoryQueries:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
-        fts_query = self._fts_query(content_like or "") if content_like else ""
-        use_fts = bool(content_like and fts_query and self.fts5_available)
+        fts_query = self._db._fts_query(content_like or "") if content_like else ""
+        use_fts = bool(content_like and fts_query and self._db.fts5_available)
         query = (
             "SELECT memories.* FROM memories "
             "JOIN memories_fts ON memories_fts.memory_id = memories.id WHERE 1=1"
@@ -115,7 +118,7 @@ class MemoryQueries:
             )
         params.extend([limit, offset])
 
-        cursor = await self.conn.execute(query, params)
+        cursor = await self._db.conn.execute(query, params)
         rows = await cursor.fetchall()
         await cursor.close()
         return [self._row_to_memory(r) for r in rows]
@@ -133,15 +136,15 @@ class MemoryQueries:
         if not sets:
             return False
         params.append(memory_id)
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             f"UPDATE memories SET {', '.join(sets)} WHERE id = ?", params
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
         return cursor.rowcount > 0
 
     async def delete_memory(self, memory_id: str) -> bool:
-        cursor = await self.conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
-        await self.conn.commit()
+        cursor = await self._db.conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        await self._db.conn.commit()
         return cursor.rowcount > 0
 
     async def delete_memory_cascade(self, memory_id: str) -> bool:
@@ -151,32 +154,32 @@ class MemoryQueries:
         report success while entity, trust or conflict residues survive.
         Orphan entity rows are pruned after their final link disappears.
         """
-        await self.conn.execute("BEGIN IMMEDIATE")
+        await self._db.conn.execute("BEGIN IMMEDIATE")
         try:
-            await self.conn.execute(
+            await self._db.conn.execute(
                 "DELETE FROM memory_conflict_candidates "
                 "WHERE memory_id_a = ? OR memory_id_b = ?",
                 (memory_id, memory_id),
             )
-            await self.conn.execute(
+            await self._db.conn.execute(
                 "DELETE FROM memory_trust_scores WHERE memory_id = ?",
                 (memory_id,),
             )
-            await self.conn.execute(
+            await self._db.conn.execute(
                 "DELETE FROM memory_entities WHERE memory_id = ?",
                 (memory_id,),
             )
-            cursor = await self.conn.execute(
+            cursor = await self._db.conn.execute(
                 "DELETE FROM memories WHERE id = ?", (memory_id,)
             )
-            await self.conn.execute(
+            await self._db.conn.execute(
                 "DELETE FROM entities WHERE id NOT IN "
                 "(SELECT DISTINCT entity_id FROM memory_entities)"
             )
-            await self.conn.commit()
+            await self._db.conn.commit()
             return cursor.rowcount > 0
         except Exception:
-            await self.conn.rollback()
+            await self._db.conn.rollback()
             raise
 
     async def memory_residue(self, memory_id: str) -> dict:
@@ -199,7 +202,7 @@ class MemoryQueries:
         }
         out = {}
         for key, (sql, params) in checks.items():
-            cursor = await self.conn.execute(sql, params)
+            cursor = await self._db.conn.execute(sql, params)
             row = await cursor.fetchone()
             await cursor.close()
             out[key] = int(row[0] if row else 0)

@@ -14,8 +14,11 @@ from typing import Optional
 class TrustQueries:
     """Trust scores and conflict candidates."""
 
+    def __init__(self, db) -> None:
+        self._db = db
+
     async def upsert_trust(self, row: dict) -> None:
-        await self.conn.execute(
+        await self._db.conn.execute(
             """
             INSERT INTO memory_trust_scores
                 (memory_id, confidence, source_score, corroboration_score,
@@ -40,7 +43,7 @@ class TrustQueries:
         )
 
     async def get_trust(self, memory_id: str) -> Optional[dict]:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT * FROM memory_trust_scores WHERE memory_id = ?", (memory_id,)
         )
         r = await cursor.fetchone()
@@ -48,7 +51,7 @@ class TrustQueries:
         return dict(r) if r else None
 
     async def list_low_trust(self, threshold: float = 0.4, limit: int = 50) -> list[dict]:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             """
             SELECT * FROM memory_trust_scores
             WHERE confidence < ?
@@ -62,7 +65,7 @@ class TrustQueries:
         return [dict(r) for r in rows]
 
     async def list_all_trust(self, limit: int = 1_000_000) -> list[dict]:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT * FROM memory_trust_scores ORDER BY confidence ASC LIMIT ?",
             (limit,),
         )
@@ -71,11 +74,11 @@ class TrustQueries:
         return [dict(r) for r in rows]
 
     async def clear_trust(self) -> None:
-        await self.conn.execute("DELETE FROM memory_trust_scores")
-        await self.conn.commit()
+        await self._db.conn.execute("DELETE FROM memory_trust_scores")
+        await self._db.conn.commit()
 
     async def get_conflict(self, conflict_id: str) -> Optional[dict]:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT * FROM memory_conflict_candidates WHERE id = ?", (conflict_id,)
         )
         r = await cursor.fetchone()
@@ -86,10 +89,10 @@ class TrustQueries:
         """Insert a new candidate only if the pair isn't already recorded (so a
         re-run never resets a dismissed/confirmed candidate to open). Returns
         True if a new row was inserted."""
-        existing = await self.get_conflict(row["id"])
+        existing = await self._db.get_conflict(row["id"])
         if existing is not None:
             return False
-        await self.conn.execute(
+        await self._db.conn.execute(
             """
             INSERT INTO memory_conflict_candidates
                 (id, memory_id_a, memory_id_b, shared_entities_json, signal_type,
@@ -131,9 +134,9 @@ class TrustQueries:
         Returns what happened: ``inserted`` | ``reopened`` | ``refreshed`` |
         ``unchanged``.
         """
-        existing = await self.get_conflict(row["id"])
+        existing = await self._db.get_conflict(row["id"])
         if existing is None:
-            await self.conn.execute(
+            await self._db.conn.execute(
                 """
                 INSERT INTO memory_conflict_candidates
                     (id, memory_id_a, memory_id_b, shared_entities_json, signal_type,
@@ -144,7 +147,7 @@ class TrustQueries:
                 """,
                 row,
             )
-            await self.conn.commit()
+            await self._db.conn.commit()
             return "inserted"
 
         signal_changed = existing["signal_type"] != row["signal_type"]
@@ -152,7 +155,7 @@ class TrustQueries:
             return "unchanged"
 
         outcome = "refreshed" if existing["status"] == "open" else "reopened"
-        await self.conn.execute(
+        await self._db.conn.execute(
             """
             UPDATE memory_conflict_candidates
                SET signal_type = :signal_type,
@@ -165,18 +168,18 @@ class TrustQueries:
             """,
             row,
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
         return outcome
 
     async def list_conflicts(self, status: Optional[str] = None, limit: int = 100) -> list[dict]:
         if status:
-            cursor = await self.conn.execute(
+            cursor = await self._db.conn.execute(
                 "SELECT * FROM memory_conflict_candidates WHERE status = ? "
                 "ORDER BY confidence DESC, created_at DESC LIMIT ?",
                 (status, limit),
             )
         else:
-            cursor = await self.conn.execute(
+            cursor = await self._db.conn.execute(
                 "SELECT * FROM memory_conflict_candidates "
                 "ORDER BY confidence DESC, created_at DESC LIMIT ?",
                 (limit,),
@@ -188,18 +191,18 @@ class TrustQueries:
     async def update_conflict_status(
         self, conflict_id: str, status: str, reviewed_at: str
     ) -> bool:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "UPDATE memory_conflict_candidates SET status = ?, reviewed_at = ? WHERE id = ?",
             (status, reviewed_at, conflict_id),
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
         return cursor.rowcount > 0
 
     async def delete_conflict(self, conflict_id: str) -> bool:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "DELETE FROM memory_conflict_candidates WHERE id = ?", (conflict_id,)
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
         return cursor.rowcount > 0
 
     async def delete_conflicts_for_memory_ids(self, memory_ids: list[str]) -> int:
@@ -208,10 +211,10 @@ class TrustQueries:
         if not ids:
             return 0
         placeholders = ",".join("?" for _ in ids)
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             f"DELETE FROM memory_conflict_candidates "
             f"WHERE memory_id_a IN ({placeholders}) OR memory_id_b IN ({placeholders})",
             [*ids, *ids],
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
         return cursor.rowcount

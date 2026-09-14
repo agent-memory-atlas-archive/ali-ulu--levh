@@ -12,8 +12,11 @@ from datetime import datetime, timezone
 class AttachmentQueries:
     """CRUD + verification bookkeeping for the ``attachments`` table."""
 
+    def __init__(self, db) -> None:
+        self._db = db
+
     async def insert_attachment(self, row: dict) -> None:
-        await self.conn.execute(
+        await self._db.conn.execute(
             """
             INSERT INTO attachments
                 (id, memory_id, path, sha256, mime, size, derived_text,
@@ -24,10 +27,10 @@ class AttachmentQueries:
             """,
             row,
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
 
     async def get_attachment(self, attachment_id: str) -> dict | None:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT * FROM attachments WHERE id = ?", (attachment_id,)
         )
         row = await cursor.fetchone()
@@ -35,7 +38,7 @@ class AttachmentQueries:
         return dict(row) if row else None
 
     async def list_attachments(self, memory_id: str) -> list[dict]:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT * FROM attachments WHERE memory_id = ? ORDER BY created_at",
             (memory_id,),
         )
@@ -50,7 +53,7 @@ class AttachmentQueries:
         if not ids:
             return {}
         placeholders = ",".join("?" for _ in ids)
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             f"SELECT * FROM attachments WHERE memory_id IN ({placeholders}) ORDER BY created_at",
             ids,
         )
@@ -63,7 +66,7 @@ class AttachmentQueries:
         return by_memory
 
     async def all_attachments(self, limit: int = 100000) -> list[dict]:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT * FROM attachments ORDER BY created_at LIMIT ?", (limit,)
         )
         rows = await cursor.fetchall()
@@ -75,21 +78,21 @@ class AttachmentQueries:
     ) -> bool:
         verified_at = datetime.now(timezone.utc).isoformat()
         if sha256 is not None:
-            cursor = await self.conn.execute(
+            cursor = await self._db.conn.execute(
                 "UPDATE attachments SET status = ?, sha256 = ?, verified_at = ? WHERE id = ?",
                 (status, sha256, verified_at, attachment_id),
             )
         else:
-            cursor = await self.conn.execute(
+            cursor = await self._db.conn.execute(
                 "UPDATE attachments SET status = ?, verified_at = ? WHERE id = ?",
                 (status, verified_at, attachment_id),
             )
-        await self.conn.commit()
+        await self._db.conn.commit()
         return cursor.rowcount > 0
 
     async def delete_attachment(self, attachment_id: str) -> bool:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "DELETE FROM attachments WHERE id = ?", (attachment_id,)
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
         return cursor.rowcount > 0

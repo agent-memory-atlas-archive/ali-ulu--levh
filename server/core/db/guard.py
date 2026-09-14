@@ -14,8 +14,11 @@ from typing import Optional
 class GuardQueries:
     """Mistake-guard violation rows."""
 
+    def __init__(self, db) -> None:
+        self._db = db
+
     async def insert_violation(self, violation: dict) -> None:
-        await self.conn.execute(
+        await self._db.conn.execute(
             """
             INSERT INTO violations
                 (id, rule_id, task, wrong_action, root_cause, tool_name,
@@ -26,7 +29,7 @@ class GuardQueries:
             """,
             violation,
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
 
     async def list_violations(
         self,
@@ -45,18 +48,18 @@ class GuardQueries:
         query += " ORDER BY occurred_at DESC LIMIT ?"
         params.append(limit)
 
-        cursor = await self.conn.execute(query, params)
+        cursor = await self._db.conn.execute(query, params)
         rows = await cursor.fetchall()
         await cursor.close()
         return [dict(r) for r in rows]
 
     async def count_violations(self, since: Optional[str] = None) -> int:
         if since:
-            cursor = await self.conn.execute(
+            cursor = await self._db.conn.execute(
                 "SELECT COUNT(*) FROM violations WHERE occurred_at >= ?", (since,)
             )
         else:
-            cursor = await self.conn.execute("SELECT COUNT(*) FROM violations")
+            cursor = await self._db.conn.execute("SELECT COUNT(*) FROM violations")
         row = await cursor.fetchone()
         await cursor.close()
         return int(row[0]) if row else 0

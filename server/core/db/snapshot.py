@@ -19,16 +19,19 @@ from ..env import get_env
 class SnapshotQueries:
     """Whole-database operations: safety backups and restore."""
 
+    def __init__(self, db) -> None:
+        self._db = db
+
     async def create_safety_backup(self, destination: str | None = None) -> str | None:
         """Create a consistent SQLite safety copy before destructive restore.
 
         Uses SQLite's online backup API, so WAL pages are included correctly.
         In-memory databases have no durable location and therefore return None.
         """
-        if self.db_path == ":memory:":
+        if self._db.db_path == ":memory:":
             return None
 
-        source = Path(self.db_path).expanduser().resolve()
+        source = Path(self._db.db_path).expanduser().resolve()
         if destination:
             target = Path(destination).expanduser().resolve()
         else:
@@ -48,7 +51,7 @@ class SnapshotQueries:
 
         target.parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(str(target)) as destination_conn:
-            await self.conn.backup(destination_conn)
+            await self._db.conn.backup(destination_conn)
         try:
             target.chmod(0o600)
         except OSError:
@@ -68,35 +71,35 @@ class SnapshotQueries:
         destructive clear occurs until all validation has succeeded.
         """
         attachments = attachments or []
-        await self.conn.execute("BEGIN IMMEDIATE")
+        await self._db.conn.execute("BEGIN IMMEDIATE")
         try:
             memory_ids = [str(m["id"]) for m in memories]
             if replace:
-                await self.conn.execute("DELETE FROM memory_conflict_candidates")
-                await self.conn.execute("DELETE FROM memory_trust_scores")
-                await self.conn.execute("DELETE FROM memory_entities")
-                await self.conn.execute("DELETE FROM entities")
+                await self._db.conn.execute("DELETE FROM memory_conflict_candidates")
+                await self._db.conn.execute("DELETE FROM memory_trust_scores")
+                await self._db.conn.execute("DELETE FROM memory_entities")
+                await self._db.conn.execute("DELETE FROM entities")
                 # attachments cascades from memories via ON DELETE CASCADE
-                await self.conn.execute("DELETE FROM memories")
-                await self.conn.execute("DELETE FROM sessions")
+                await self._db.conn.execute("DELETE FROM memories")
+                await self._db.conn.execute("DELETE FROM sessions")
             elif memory_ids:
                 placeholders = ",".join("?" for _ in memory_ids)
-                await self.conn.execute(
+                await self._db.conn.execute(
                     f"DELETE FROM memory_conflict_candidates "
                     f"WHERE memory_id_a IN ({placeholders}) OR memory_id_b IN ({placeholders})",
                     [*memory_ids, *memory_ids],
                 )
-                await self.conn.execute(
+                await self._db.conn.execute(
                     f"DELETE FROM memory_trust_scores WHERE memory_id IN ({placeholders})",
                     memory_ids,
                 )
-                await self.conn.execute(
+                await self._db.conn.execute(
                     f"DELETE FROM memory_entities WHERE memory_id IN ({placeholders})",
                     memory_ids,
                 )
 
             for session in sessions:
-                await self.conn.execute(
+                await self._db.conn.execute(
                     """
                     INSERT OR REPLACE INTO sessions
                         (id, name, status, metadata, memory_count, created_at, ended_at)
@@ -114,7 +117,7 @@ class SnapshotQueries:
                 )
 
             for memory in memories:
-                await self.conn.execute(
+                await self._db.conn.execute(
                     """
                     INSERT OR REPLACE INTO memories
                         (id, content, memory_type, embedding, importance, frequency,
@@ -145,7 +148,7 @@ class SnapshotQueries:
                 )
 
             for attachment in attachments:
-                await self.conn.execute(
+                await self._db.conn.execute(
                     """
                     INSERT OR REPLACE INTO attachments
                         (id, memory_id, path, sha256, mime, size, derived_text,
@@ -169,7 +172,7 @@ class SnapshotQueries:
 
             # Session counts are derived from actual restored rows, never
             # trusted from a potentially stale snapshot field.
-            await self.conn.execute(
+            await self._db.conn.execute(
                 """
                 UPDATE sessions
                 SET memory_count = (
@@ -177,11 +180,11 @@ class SnapshotQueries:
                 )
                 """
             )
-            await self.conn.execute(
+            await self._db.conn.execute(
                 "DELETE FROM entities WHERE id NOT IN "
                 "(SELECT DISTINCT entity_id FROM memory_entities)"
             )
-            await self.conn.commit()
+            await self._db.conn.commit()
         except Exception:
-            await self.conn.rollback()
+            await self._db.conn.rollback()
             raise

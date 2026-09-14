@@ -1,4 +1,16 @@
-"""SQLite Database Layer — Zero-ops persistence for LEVH."""
+"""SQLite Database Layer — Zero-ops persistence for LEVH.
+
+Composition, not inheritance (issue #94): ``Database`` is a thin facade that
+owns the connection lifecycle, schema/migrations and transactions, and holds
+one instance of each query group (``server.core.db.*``) injected through
+their constructors. Data flows one way: callers ask the facade (or the
+engine asks it), the facade owns the connection, the query groups use it.
+
+Backwards compatibility: every historical ``db.<method>()`` call site still
+works. ``__getattr__`` resolves any name not defined here against the
+composed query groups, so the ~79 former mixin methods keep their old
+addresses without this file re-listing them.
+"""
 
 from __future__ import annotations
 
@@ -23,27 +35,14 @@ from .db.trust import TrustQueries
 
 DEFAULT_BUSY_TIMEOUT_MS = 5_000
 
-# ── Schema ────────────────────────────────────────────────────────────
 
+class Database:
+    """Async SQLite wrapper with auto-init.
 
-
-
-
-
-
-class Database(
-    MemoryQueries,
-    AggregateQueries,
-    SessionQueries,
-    EntityQueries,
-    TrustQueries,
-    GuardQueries,
-    SnapshotQueries,
-    AttachmentQueries,
-    HeldMemoryQueries,
-    FindingQueries,
-):
-    """Async SQLite wrapper with auto-init."""
+    Owns: the connection, PRAGMAs, schema + migrations, commit/close and the
+    cross-process change counter. Composes: one query group per concern,
+    each constructed with this facade so its SQL reaches ``self._db.conn``.
+    """
 
     def __init__(self, db_path: str = _DEFAULT_DB_PATH):
         self.db_path = db_path
@@ -57,6 +56,31 @@ class Database(
         self.busy_timeout_ms = max(0, configured_timeout)
         self.fts5_available = False
         self.schema_version = 0
+
+        # The query groups, composed (issue #94). Each gets the facade so it
+        # reads the live connection through ``self._db.conn``.
+        self.memories = MemoryQueries(self)
+        self.aggregates = AggregateQueries(self)
+        self.sessions = SessionQueries(self)
+        self.entities = EntityQueries(self)
+        self.trust = TrustQueries(self)
+        self.guard = GuardQueries(self)
+        self.snapshot = SnapshotQueries(self)
+        self.attachments = AttachmentQueries(self)
+        self.held = HeldMemoryQueries(self)
+        self.findings = FindingQueries(self)
+        self._groups = (
+            self.memories,
+            self.aggregates,
+            self.sessions,
+            self.entities,
+            self.trust,
+            self.guard,
+            self.snapshot,
+            self.attachments,
+            self.held,
+            self.findings,
+        )
 
     async def connect(self) -> None:
         """Open connection and create tables if needed. Safe to call twice."""
@@ -178,7 +202,6 @@ class Database(
             values[key] = row[0] if row else None
         return values
 
-
     @property
     def conn(self) -> aiosqlite.Connection:
         assert self._connection is not None, "Database not connected. Call connect() first."
@@ -187,7 +210,7 @@ class Database(
     async def data_version(self) -> int:
         """SQLite's own cross-connection change counter for this database file.
 
-        `PRAGMA data_version` changes whenever ANY *other* connection commits —
+        ``PRAGMA data_version`` changes whenever ANY *other* connection commits —
         including a different process — but a connection's own commits never
         bump its own view of it (verified empirically, not just per the SQLite
         docs). That is exactly "did a peer write since I last checked," for
@@ -207,74 +230,26 @@ class Database(
             await self._connection.close()
             self._connection = None
 
-    # ── Memory CRUD ───────────────────────────────────────────────
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # ── Session CRUD ──────────────────────────────────────────────
-
-
-
-
-
-
-    # ── Connector sync state (v2) ─────────────────────────────────
-
-
-
-
-    # ── Mistake guard ─────────────────────────────────────────────
-
-
-
-
-    # ── Entity knowledge graph ────────────────────────────────────
-
-
-
-
     async def commit(self) -> None:
         await self.conn.commit()
 
+    def __getattr__(self, name: str):
+        """Resolve former mixin methods against the composed query groups.
 
-
-
-
-
-
-    # ── Provenance / trust scores ─────────────────────────────────
-
-
-
-
-
-
-    # ── Conflict candidates ───────────────────────────────────────
-
-
-
-
-
-
-
-
-    # ── Helpers ──────────────────────────────────────────────────
-
-
+        Keeps every historical ``db.<method>()`` call site working without
+        this facade re-listing ~79 methods. Attribute lookup reaches here
+        only after normal instance/class lookup fails, so facade-owned names
+        (conn, connect, commit, close, ...) always win.
+        """
+        if name.startswith("__"):
+            raise AttributeError(name)
+        for group in self.__dict__.get("_groups", ()):
+            # Walk the group's MRO: its own __dict__ only holds methods the
+            # subclass defines; inherited ones live on the base class.
+            for klass in type(group).__mro__:
+                attr = klass.__dict__.get(name)
+                if attr is not None:
+                    return attr.__get__(group)
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r}"
+        )

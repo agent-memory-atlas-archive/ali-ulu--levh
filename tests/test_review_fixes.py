@@ -154,8 +154,9 @@ async def test_import_reports_skipped(engine):
     events = []
     engine.subscribe(lambda ev, payload: events.append((ev, payload)))
     # one valid record, one malformed (missing required content)
-    good = (await engine.store(content="valid one", memory_type="episodic")).model_dump()
-    imported = await engine.import_memories([good, {"not": "a memory"}])
-    assert imported == 1
+    good = {"content": "valid one", "memory_type": "episodic"}
+    result = await engine.import_memories_gated([good, {"not": "a memory"}])
+    assert result["imported"] == 1
+    assert result["errors"] == 1
     imported_events = [p for ev, p in events if ev == "imported"]
-    assert imported_events and imported_events[-1]["skipped"] == 1
+    assert imported_events and imported_events[-1]["errors"] == 1

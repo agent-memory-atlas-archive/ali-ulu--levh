@@ -243,7 +243,9 @@ async def test_low_level_import_does_not_leave_ghost_cache_on_db_failure(tmp_pat
             raise RuntimeError("simulated database failure")
 
         monkeypatch.setattr(engine.episodic, "store", fail_store)
-        assert await engine.import_memories([item]) == 0
+        result = await engine.import_memories_gated([item])
+        assert result["imported"] == 0
+        assert result["errors"] == 1
         assert engine.vector_store.size == 0
         assert len(engine.short_term) == 0
     finally:

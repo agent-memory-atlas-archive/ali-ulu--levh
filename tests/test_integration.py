@@ -318,7 +318,9 @@ async def test_clear_short_term(engine):
 
 @pytest.mark.asyncio
 async def test_export_import_roundtrip(engine):
-    """Export memories, clear, import back, verify integrity."""
+    """Export memories, clear, restore back via the trusted restore path,
+    verify integrity. (Exact-record restore is backup/restore's job; the
+    gated JSON import is for user-supplied content.)"""
     m1 = await engine.store(content="Export test 1", importance=0.7, tags=["export"], memory_type="episodic")
     m2 = await engine.store(content="Export test 2", importance=0.8, tags=["export"], memory_type="episodic")
 
@@ -329,8 +331,11 @@ async def test_export_import_roundtrip(engine):
     await engine.forget(m2.id)
     assert await engine.get_memory(m1.id) is None
 
-    count = await engine.import_memories(exported)
-    assert count >= 2
+    from server.core.backup import make_snapshot
+
+    snapshot = make_snapshot(exported, [], "", "2026-01-01T00:00:00+00:00")
+    result = await engine.restore(snapshot)
+    assert result["memories"] >= 2
 
     restored = await engine.list_memories()
     contents = [m.content for m in restored]

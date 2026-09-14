@@ -56,17 +56,6 @@ class RuntimeConfig:
     mcp_transport: str
     config_path: str | None
 
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "database_path": self.database_path,
-            "embedder_mode": self.embedder_mode,
-            "short_term_max": self.short_term_max,
-            "api_host": self.api_host,
-            "api_port": self.api_port,
-            "mcp_transport": self.mcp_transport,
-            "config_path": self.config_path,
-        }
-
 
 def _config_path(*, cwd: str | os.PathLike[str] | None, environ: Mapping[str, str]) -> Path:
     explicit = (get_env(CONFIG_PATH_ENV, "", environ=environ) or "").strip()

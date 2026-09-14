@@ -78,7 +78,9 @@ async def test_new_memory_records_embedding_provenance(tmp_path):
             "version": "embedding-provenance-v1",
             "requested_mode": "hash",
         }
-        assert await engine.db.embedding_dimension_counts() == {384: 1}
+        assert await engine.db.count_memories() == 1
+        embedding = (await engine.list_memories(limit=1))[0].embedding
+        assert len(embedding) == 384
     finally:
         await engine.shutdown()
 

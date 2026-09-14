@@ -23,7 +23,6 @@ import pytest_asyncio
 from server.core import engine_provider
 from server.core.dogfood import (
     DogfoodJournal,
-    default_journal_path_for,
     dogfood_enabled,
     maybe_attach,
     resolve_journal_path,
@@ -71,13 +70,15 @@ def test_provider_engine_attaches_only_when_enabled(monkeypatch, tmp_path):
 
 
 def test_default_journal_path_sits_next_to_db(monkeypatch, tmp_path):
+    """The production journal resolver (the one maybe_attach uses) puts the
+    journal next to the SQLite database, and DOGFOOD_JOURNAL_PATH wins."""
     monkeypatch.delenv("DOGFOOD_JOURNAL_PATH", raising=False)
     db = tmp_path / "data" / "mem.db"
-    assert default_journal_path_for(str(db)) == str(
+    assert resolve_journal_path(db_path=db) == str(
         (tmp_path / "data" / "dogfood_events.jsonl").resolve()
     )
     monkeypatch.setenv("DOGFOOD_JOURNAL_PATH", str(tmp_path / "elsewhere.jsonl"))
-    assert default_journal_path_for(str(db)) == str(tmp_path / "elsewhere.jsonl")
+    assert resolve_journal_path(db_path=db) == str(tmp_path / "elsewhere.jsonl")
 
 
 def test_resolver_precedence(monkeypatch, tmp_path):
@@ -96,7 +97,7 @@ def test_provider_and_cli_resolve_same_db_sibling(monkeypatch, tmp_path):
     db = tmp_path / "state" / "memory.db"
     monkeypatch.setenv("SQLITE_DB_PATH", str(db))
     monkeypatch.delenv("DOGFOOD_JOURNAL_PATH", raising=False)
-    provider_path = default_journal_path_for(str(db))
+    provider_path = resolve_journal_path(db_path=db)
     cli_path = resolve_journal_path(db_path=os.getenv("SQLITE_DB_PATH"))
     assert provider_path == cli_path
 

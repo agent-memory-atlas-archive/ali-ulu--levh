@@ -34,39 +34,6 @@ class MemoryTransferMixin:
         memories = await self.episodic.search(**filters, limit=10000)
         return [m.model_dump() for m in memories]
 
-    async def import_memories(self, data: list[dict]) -> int:
-        """Restore trusted, already-normalized memory records exactly.
-
-        This low-level path preserves IDs, timestamps and lifecycle state and is
-        therefore reserved for backup/restore and internal compatibility.  User
-        facing JSON imports must use :meth:`import_memories_gated` so content is
-        evaluated by the admission policy before persistence.
-
-        SQLite is written *before* in-memory caches.  A failed DB write can no
-        longer leave a ghost memory that is recallable until process restart.
-        """
-        count = 0
-        skipped = 0
-        for item in data:
-            try:
-                mem = Memory(**item)
-                await self.episodic.store(mem)
-                if mem.memory_type == MemoryType.SHORT_TERM:
-                    self.short_term.add(mem)
-                if mem.embedding:
-                    self.vector_store.add(mem)
-                count += 1
-            except Exception:
-                # Malformed record — skip it but keep a count so a partially
-                # bad import file is visible instead of silently swallowed.
-                skipped += 1
-                continue
-        if count or skipped:
-            if count:
-                self._mark_derived_dirty()
-            self._emit("imported", {"count": count, "skipped": skipped, "gated": False})
-        return count
-
     async def import_memories_gated(self, data: list[dict]) -> dict:
         """Import user-supplied JSON through the deterministic admission gate.
 

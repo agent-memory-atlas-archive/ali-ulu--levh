@@ -24,20 +24,26 @@ class MemoryGraphMixin:
         self, entity_type: str | None = None, limit: int = 200
     ) -> list[dict]:
         """List persisted entities (optionally filtered by type), most-mentioned
-        first. Distinct from ``list_people`` — this reads the persistent graph."""
-        await self._ensure_derived_state()
+        first. Distinct from ``list_people`` — this reads the persistent graph.
+
+        Stale-ok is NOT safe here: the background rebuild clears the graph
+        before repopulating, so a read racing it can see a half-empty index.
+        Freshness-required."""
+        await self.recompute_derived_state()
         return await self.entity_index.list_entities_graph(entity_type=entity_type, limit=limit)
 
     async def get_entity(self, query: str, entity_type: str | None = None) -> dict | None:
         """Resolve a query to a persisted entity and return its profile: the
         memories that mention it (newest first) and the entities it co-occurs
-        with (its graph neighbours)."""
-        await self._ensure_derived_state()
+        with (its graph neighbours). Freshness-required — the background
+        rebuild transiently empties the graph mid-pass."""
+        await self.recompute_derived_state()
         return await self.entity_index.get_entity(query, entity_type=entity_type)
 
     async def entity_graph_stats(self) -> dict:
-        """Counts of persisted entities by type."""
-        await self._ensure_derived_state()
+        """Counts of persisted entities by type. Freshness-required — the
+        background rebuild transiently empties the graph mid-pass."""
+        await self.recompute_derived_state()
         return await self.entity_index.entity_graph_stats()
 
     async def recompute_trust_scores(self) -> dict:
@@ -49,21 +55,27 @@ class MemoryGraphMixin:
         return await self.trust_service.recompute_trust_scores()
 
     async def get_trust(self, memory_id: str) -> dict | None:
-        """Return the stored trust breakdown, computing it on demand if absent."""
-        await self._ensure_derived_state()
+        """Return the stored trust breakdown, computing it on demand if absent.
+
+        Freshness-required: tests and review flows read the verdict
+        immediately after a mutation, so this awaits the rebuild inline
+        rather than returning stale-ok rows."""
+        await self.recompute_derived_state()
         return await self.trust_service.get_trust(memory_id)
 
     async def list_low_trust(self, threshold: float = 0.4, limit: int = 50) -> list[dict]:
-        """Return stored memories below the requested trust threshold."""
-        await self._ensure_derived_state()
+        """Return stored memories below the requested trust threshold.
+        Freshness-required — a human acts on this list."""
+        await self.recompute_derived_state()
         return await self.trust_service.list_low_trust(
             threshold=threshold,
             limit=limit,
         )
 
     async def list_all_trust(self, limit: int = 1_000_000) -> list[dict]:
-        """Return every stored trust breakdown, best score first."""
-        await self._ensure_derived_state()
+        """Return every stored trust breakdown, best score first.
+        Freshness-required — dashboards sort by these rows."""
+        await self.recompute_derived_state()
         return await self.trust_service.list_all_trust(limit=limit)
 
     async def detect_conflict_candidates(self) -> dict:
@@ -73,7 +85,10 @@ class MemoryGraphMixin:
     async def list_conflict_candidates(
         self, status: str | None = "open", limit: int = 100
     ) -> list[dict]:
-        await self._ensure_derived_state()
+        """Freshness-required: a review decision is made on exactly these
+        rows, so the read awaits the rebuild inline (issue #102 acceptance:
+        semantics of conflict verdicts unchanged)."""
+        await self.recompute_derived_state()
         return await self.conflict_service.list_conflict_candidates(
             status=status,
             limit=limit,

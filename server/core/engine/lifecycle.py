@@ -8,6 +8,7 @@ the split verifiable.
 
 from __future__ import annotations
 
+import asyncio
 
 from .helpers import EventListener
 from ..types import (
@@ -110,23 +111,78 @@ class MemoryLifecycleMixin:
         self._derived_dirty = True
 
     async def _ensure_derived_state(self) -> None:
-        """Reconcile graph, conflicts and trust before a derived-state read.
+        """Schedule a derived-state rebuild without blocking the caller (issue #102).
 
-        Mutations mark these materialized views dirty.  The first graph/trust/
-        conflict read performs one deterministic rebuild, avoiding stale rows
-        without forcing every high-volume ingest item to run an O(n²) conflict
-        scan.
+        Mutations mark graph/trust/conflict views dirty.  A read used to run
+        the whole rebuild inline — reindex_entities -> detect_conflict_candidates
+        (O(n²) pairwise) -> recompute_trust_scores (full corpus) — so the first
+        read after any write paid for all of it.  Now the read returns on the
+        current (stale-ok) rows immediately and the rebuild runs as a
+        background task, coalesced by ``_refreshing_derived`` so concurrent
+        dirty reads schedule exactly one rebuild.  A write landing during a
+        rebuild re-dirties the flag and the running pass schedules its own
+        successor, so the views converge without the read ever waiting.
+
+        Callers that need *fresh* rows (a verdict a human will act on right
+        now) await :meth:`recompute_derived_state` instead.
         """
-        if not self._derived_dirty or self._refreshing_derived:
+        if not self._derived_dirty:
+            return
+        if self._refreshing_derived:
             return
         self._refreshing_derived = True
+        try:
+            self._derived_task = asyncio.get_running_loop().create_task(
+                self._rebuild_derived()
+            )
+        except RuntimeError:
+            # No running loop (rare sync context): fall back to inline rebuild
+            # rather than silently leaving the views stale forever.
+            self._refreshing_derived = False
+            await self._rebuild_derived()
+
+    async def _rebuild_derived(self) -> None:
+        """Run one deterministic derived-state rebuild; the sole writer of
+        ``_derived_dirty = False`` for its own pass."""
         try:
             await self.reindex_entities()
             await self.detect_conflict_candidates()
             await self.recompute_trust_scores()
             self._derived_dirty = False
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — a failed rebuild must not kill the task
+            pass
         finally:
             self._refreshing_derived = False
+            # Writes that landed mid-rebuild re-dirtied the flag; schedule the
+            # successor so the views still converge.
+            if self._derived_dirty:
+                await self._ensure_derived_state()
+
+    async def recompute_derived_state(self) -> None:
+        """Rebuild derived state NOW and return when it is fresh.
+
+        The opt-in freshness boundary (issue #102): MCP/HTTP paths and flows
+        whose next line acts on the verdict — restore, review decisions —
+        await this; ordinary reads go stale-ok through
+        :meth:`_ensure_derived_state`.
+        """
+        self._derived_dirty = True
+        await self._rebuild_derived_inline()
+
+    async def _rebuild_derived_inline(self) -> None:
+        """Inline rebuild for freshness-required callers. Serialized against a
+        running background pass by awaiting its task first."""
+        task = self._derived_task
+        if task is not None and not task.done():
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:  # noqa: BLE001 — the inline pass below decides freshness
+                pass
+        await self._rebuild_derived()
 
     @staticmethod
     def _memory_event_payload(memory: Memory) -> dict:

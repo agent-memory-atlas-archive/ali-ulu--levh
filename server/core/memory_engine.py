@@ -101,6 +101,7 @@ class MemoryEngine(
         self._listeners: list[EventListener] = []
         self._derived_dirty = False
         self._refreshing_derived = False
+        self._derived_task: asyncio.Task | None = None
         self.entity_index = EntityIndexService(self.db, self.episodic, self._emit)
         self.trust_service = TrustService(
             self.db,

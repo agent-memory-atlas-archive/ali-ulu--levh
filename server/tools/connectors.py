@@ -19,7 +19,6 @@ def register(mcp: FastMCP, engine: MemoryEngine) -> None:
     async def import_from_app(
         connector: str,
         config: str = "{}",
-        batch_size: int = 50,
         importance: float = 0.5,
     ) -> str:
         """Import data from an external app (local files, Obsidian, Notion, GitHub).
@@ -33,7 +32,6 @@ def register(mcp: FastMCP, engine: MemoryEngine) -> None:
                       obsidian:     {"vault_path": "/path/to/vault"}
                       notion:       {"api_key": "ntn_...", "database_ids": ["..."]}
                       github:       {"token": "ghp_...", "repos": ["owner/repo"]}
-            batch_size: Number of memories to store per batch. Default 50.
             importance: Default importance for imported memories (0-1). Default 0.5.
         """
         import json
@@ -67,9 +65,16 @@ def register(mcp: FastMCP, engine: MemoryEngine) -> None:
 
         # Legacy MCP import remains admission-gated; connector v2 adds
         # incremental sync state, but both surfaces share dedupe/redaction.
+        # The tool-level `importance` is the default for items that do not
+        # carry their own (connector items may set importance per item).
+        prepared_items = []
+        for item in items:
+            prepared = dict(item or {})
+            prepared.setdefault("importance", importance)
+            prepared_items.append(prepared)
         try:
             result = await engine.ingest_items(
-                items,
+                prepared_items,
                 connector=connector,
                 project=None,
                 use_gate=True,

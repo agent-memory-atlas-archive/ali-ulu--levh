@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from pathlib import Path
 
 from server.commands.paths import _REPO_ROOT
+from server.core.db.aggregates import AggregateQueries
 from server.core.runtime_config import resolve_runtime_config
 
 
@@ -186,22 +186,18 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
 
     # 14. Embedding compatibility. Mixed dimensions are safe (recall skips
     # incompatible vectors) but can silently hide old memories after a model
-    # switch, so doctor makes the migration need explicit.
+    # switch, so doctor makes the migration need explicit. Dimension counting
+    # lives in one place: AggregateQueries.embedding_dimension_counts.
     try:
-        import sqlite3
-
         dimension_counts: dict[int, int] = {}
         if os.path.exists(db_path):
+            import sqlite3
+
             with sqlite3.connect(db_path) as conn:
                 rows = conn.execute(
                     "SELECT embedding FROM memories WHERE embedding IS NOT NULL"
                 ).fetchall()
-            for (raw_embedding,) in rows:
-                try:
-                    dim = len(json.loads(raw_embedding))
-                except Exception:
-                    dim = -1
-                dimension_counts[dim] = dimension_counts.get(dim, 0) + 1
+            dimension_counts = AggregateQueries.dimension_counts_from_rows(rows)
         expected_dim = int(embedder.dimension)
         mismatched = {d: n for d, n in dimension_counts.items() if d != expected_dim}
         if mismatched:

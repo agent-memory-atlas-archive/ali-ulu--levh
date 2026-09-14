@@ -16,6 +16,24 @@ from typing import Optional
 class AggregateQueries:
     """Counts and groupings over the memory table."""
 
+    @staticmethod
+    def dimension_counts_from_rows(rows) -> dict[int, int]:
+        """Count stored vectors by dimension for doctor/migration warnings.
+
+        ``rows`` is an iterable of one-element sequences holding raw JSON
+        embedding strings (the shape of the doctor query). Unparseable values
+        count under the sentinel dimension ``-1`` so corruption stays visible
+        instead of being dropped.
+        """
+        counts: dict[int, int] = {}
+        for (raw_embedding,) in rows:
+            try:
+                dimension = len(json.loads(raw_embedding))
+            except Exception:
+                dimension = -1
+            counts[dimension] = counts.get(dimension, 0) + 1
+        return counts
+
     async def count_memories(self, memory_type: Optional[str] = None) -> int:
         if memory_type:
             cursor = await self.conn.execute("SELECT COUNT(*) FROM memories WHERE memory_type = ?", (memory_type,))

@@ -99,11 +99,6 @@ def dogfood_enabled() -> bool:
     return get_env(ENABLED_ENV, "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def default_journal_path_for(db_path: str | os.PathLike | None) -> str:
-    """Journal location when none is configured: DOGFOOD_JOURNAL_PATH env if
-    set, else ``dogfood_events.jsonl`` next to the SQLite database file."""
-    return resolve_journal_path(db_path=db_path)
-
 
 def maybe_attach(engine) -> "DogfoodJournal | None":
     """Wire the dogfood journal to a live engine — but ONLY when the user has

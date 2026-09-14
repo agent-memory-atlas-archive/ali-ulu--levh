@@ -93,10 +93,3 @@ class AttachmentQueries:
         )
         await self.conn.commit()
         return cursor.rowcount > 0
-
-    async def delete_attachments_for_memory(self, memory_id: str) -> int:
-        cursor = await self.conn.execute(
-            "DELETE FROM attachments WHERE memory_id = ?", (memory_id,)
-        )
-        await self.conn.commit()
-        return cursor.rowcount

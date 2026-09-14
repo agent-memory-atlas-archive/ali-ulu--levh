@@ -87,22 +87,6 @@ class AggregateQueries:
         await cursor.close()
         return row[0]
 
-    async def embedding_dimension_counts(self) -> dict[int, int]:
-        """Count stored vectors by dimension for doctor/migration warnings."""
-        cursor = await self.conn.execute(
-            "SELECT embedding FROM memories WHERE embedding IS NOT NULL"
-        )
-        rows = await cursor.fetchall()
-        await cursor.close()
-        counts: dict[int, int] = {}
-        for row in rows:
-            try:
-                dimension = len(json.loads(row[0]))
-            except Exception:
-                dimension = -1
-            counts[dimension] = counts.get(dimension, 0) + 1
-        return counts
-
     async def memory_aggregates(self) -> dict:
         """Aggregate stats over all persisted memories in one query."""
         cursor = await self.conn.execute(

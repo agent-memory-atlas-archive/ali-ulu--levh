@@ -24,6 +24,9 @@ def _now() -> str:
 class FindingQueries:
     """CRUD for the ``findings`` table."""
 
+    def __init__(self, db) -> None:
+        self._db = db
+
     async def record_finding(self, row: dict) -> dict:
         """Insert a finding, or fold a repeat into the existing row.
 
@@ -34,7 +37,7 @@ class FindingQueries:
         now = _now()
         existing = await self.get_finding(row["id"])
         if existing is None:
-            await self.conn.execute(
+            await self._db.conn.execute(
                 """
                 INSERT INTO findings
                     (id, title, detail, category, severity, source, status,
@@ -46,13 +49,13 @@ class FindingQueries:
                 """,
                 {**row, "now": now},
             )
-            await self.conn.commit()
+            await self._db.conn.commit()
             stored = await self.get_finding(row["id"])
             return {**stored, "repeat": False, "reopened": False}
 
         # A resolved problem that happens again is not resolved.
         reopened = existing["status"] == "resolved"
-        await self.conn.execute(
+        await self._db.conn.execute(
             """
             UPDATE findings
                SET occurrences  = occurrences + 1,
@@ -65,12 +68,12 @@ class FindingQueries:
             {"id": row["id"], "detail": row["detail"],
              "severity": row["severity"], "now": now},
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
         stored = await self.get_finding(row["id"])
         return {**stored, "repeat": True, "reopened": reopened}
 
     async def get_finding(self, finding_id: str) -> dict | None:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT * FROM findings WHERE id = ?", (finding_id,)
         )
         found = await cursor.fetchone()
@@ -92,7 +95,7 @@ class FindingQueries:
             params.append(category)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(max(1, min(int(limit), 1000)))
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             f"SELECT * FROM findings {where} ORDER BY last_seen_at DESC LIMIT ?",
             params,
         )
@@ -101,7 +104,7 @@ class FindingQueries:
         return [dict(r) for r in rows]
 
     async def count_findings_by_status(self) -> dict[str, int]:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT status, COUNT(*) AS n FROM findings GROUP BY status"
         )
         rows = await cursor.fetchall()
@@ -119,7 +122,7 @@ class FindingQueries:
             )
         if await self.get_finding(finding_id) is None:
             return None
-        await self.conn.execute(
+        await self._db.conn.execute(
             """
             UPDATE findings
                SET status = :status,
@@ -129,12 +132,12 @@ class FindingQueries:
             """,
             {"id": finding_id, "status": status, "note": note, "now": _now()},
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
         return await self.get_finding(finding_id)
 
     async def delete_finding(self, finding_id: str) -> bool:
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "DELETE FROM findings WHERE id = ?", (finding_id,)
         )
-        await self.conn.commit()
+        await self._db.conn.commit()
         return cursor.rowcount > 0

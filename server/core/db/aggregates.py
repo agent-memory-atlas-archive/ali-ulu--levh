@@ -16,6 +16,9 @@ from typing import Optional
 class AggregateQueries:
     """Counts and groupings over the memory table."""
 
+    def __init__(self, db) -> None:
+        self._db = db
+
     @staticmethod
     def dimension_counts_from_rows(rows) -> dict[int, int]:
         """Count stored vectors by dimension for doctor/migration warnings.
@@ -36,9 +39,9 @@ class AggregateQueries:
 
     async def count_memories(self, memory_type: Optional[str] = None) -> int:
         if memory_type:
-            cursor = await self.conn.execute("SELECT COUNT(*) FROM memories WHERE memory_type = ?", (memory_type,))
+            cursor = await self._db.conn.execute("SELECT COUNT(*) FROM memories WHERE memory_type = ?", (memory_type,))
         else:
-            cursor = await self.conn.execute("SELECT COUNT(*) FROM memories")
+            cursor = await self._db.conn.execute("SELECT COUNT(*) FROM memories")
         row = await cursor.fetchone()
         await cursor.close()
         return row[0]
@@ -59,7 +62,7 @@ class AggregateQueries:
         divergence if this were written the obvious way.
         """
         try:
-            cursor = await self.conn.execute(
+            cursor = await self._db.conn.execute(
                 """
                 SELECT COUNT(*) FROM memories
                  WHERE metadata IS NOT NULL
@@ -84,7 +87,7 @@ class AggregateQueries:
         is read, so the embeddings are never pulled off disk and no ``Memory``
         objects are built.
         """
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT metadata FROM memories WHERE metadata IS NOT NULL"
         )
         rows = await cursor.fetchall()
@@ -100,14 +103,14 @@ class AggregateQueries:
         return total
 
     async def count_pinned(self) -> int:
-        cursor = await self.conn.execute("SELECT COUNT(*) FROM memories WHERE pinned = 1")
+        cursor = await self._db.conn.execute("SELECT COUNT(*) FROM memories WHERE pinned = 1")
         row = await cursor.fetchone()
         await cursor.close()
         return row[0]
 
     async def memory_aggregates(self) -> dict:
         """Aggregate stats over all persisted memories in one query."""
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT COUNT(*), AVG(importance), AVG(hscore) FROM memories"
         )
         row = await cursor.fetchone()
@@ -120,7 +123,7 @@ class AggregateQueries:
 
     async def list_projects(self) -> list[dict]:
         """Distinct projects with memory counts, most recent first."""
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             """
             SELECT project, COUNT(*) as count, MAX(created_at) as last_used
             FROM memories
@@ -137,7 +140,7 @@ class AggregateQueries:
 
     async def list_sources(self) -> list[dict]:
         """Distinct sources (AI clients/tools) with memory counts."""
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             """
             SELECT source, COUNT(*) as count, MAX(created_at) as last_used
             FROM memories
@@ -154,7 +157,7 @@ class AggregateQueries:
 
     async def list_tags(self) -> list[dict]:
         """All tags with usage counts (tags are stored as JSON arrays)."""
-        cursor = await self.conn.execute(
+        cursor = await self._db.conn.execute(
             "SELECT tags FROM memories WHERE tags IS NOT NULL AND tags != '[]'"
         )
         rows = await cursor.fetchall()
@@ -173,9 +176,9 @@ class AggregateQueries:
 
     async def count_sessions(self, status: Optional[str] = None) -> int:
         if status:
-            cursor = await self.conn.execute("SELECT COUNT(*) FROM sessions WHERE status = ?", (status,))
+            cursor = await self._db.conn.execute("SELECT COUNT(*) FROM sessions WHERE status = ?", (status,))
         else:
-            cursor = await self.conn.execute("SELECT COUNT(*) FROM sessions")
+            cursor = await self._db.conn.execute("SELECT COUNT(*) FROM sessions")
         row = await cursor.fetchone()
         await cursor.close()
         return row[0]

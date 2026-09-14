@@ -8,6 +8,7 @@ the split verifiable.
 
 from __future__ import annotations
 
+import numpy as np
 
 from ..types import (
     ScoreBreakdown,
@@ -20,20 +21,33 @@ class MemoryExplainMixin:
     async def score_breakdown(
         self, memory_id: str, query: str
     ) -> ScoreBreakdown | None:
-        """Get individual H(x,ψ) components for a memory vs query."""
+        """Get individual H(x,ψ) components for a memory vs query.
+
+        Single source of truth for the breakdown math — the REST route
+        (GET /api/memories/{id}/score-breakdown) delegates here so cosine/
+        decay/scoring cannot drift between the two surfaces.
+
+        Raises:
+            ValueError: the stored embedding's dimension differs from the
+                active embedder's output (e.g. embedder mode changed since
+                storage). Callers surface this as a client error.
+        """
         memory = await self.episodic.get(memory_id)
         if not memory or not memory.embedding:
             return None
 
         query_embedding = await self.embedder.embed(query)
-        import numpy as np
 
-        vec_mem = np.array(memory.embedding, dtype=np.float32)
-        vec_q = np.array(query_embedding, dtype=np.float32)
-        cosine = float(
-            np.dot(vec_mem, vec_q)
-            / (np.linalg.norm(vec_mem) * np.linalg.norm(vec_q) + 1e-8)
-        )
+        vec_mem = np.asarray(memory.embedding, dtype=np.float64)
+        vec_q = np.asarray(query_embedding, dtype=np.float64)
+        if vec_mem.shape != vec_q.shape:
+            raise ValueError(
+                "embedding dimension mismatch (embedder mode changed since storage)"
+            )
+        norm_mem = np.linalg.norm(vec_mem)
+        norm_q = np.linalg.norm(vec_q)
+        cosine = float(np.dot(vec_mem, vec_q) / max(norm_mem * norm_q, 1e-9))
+        cosine = max(0.0, min(1.0, cosine))
 
         decay = (
             1.0

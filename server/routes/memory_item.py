@@ -153,60 +153,36 @@ async def get_score_breakdown(memory_id: str, query: str = ""):
 
     If query is empty, memory.content is used as the default query so the
     breakdown reflects self-similarity (baseline score for the memory).
+
+    Delegates to ``engine.score_breakdown`` — the single source of truth for
+    cosine/decay/scoring math — and reshapes its result into the public API
+    schema. Contract: 404 unknown memory, 400 memory without embedding or
+    with a mismatched embedding dimension.
     """
     engine = await get_engine()
     mem = await engine.get_memory(memory_id)
     if not mem:
         raise HTTPException(status_code=404, detail="memory not found")
+    if mem.embedding is None:
+        raise HTTPException(status_code=400, detail="memory has no embedding")
 
     # Guard: empty query falls back to memory content (produces baseline score)
     effective_query = query.strip() if query.strip() else mem.content
 
-    # Compute similarity between query and memory
-    query_embedding = await engine.embedder.embed(effective_query)
-    memory_embedding = mem.embedding
-    if memory_embedding is None:
-        raise HTTPException(status_code=400, detail="memory has no embedding")
-
-    # Manual cosine similarity
-    import numpy as np
-    q = np.asarray(query_embedding, dtype=np.float64)
-    m = np.asarray(memory_embedding, dtype=np.float64)
-    if q.shape != m.shape:
-        raise HTTPException(
-            status_code=400,
-            detail="embedding dimension mismatch (embedder mode changed since storage)",
-        )
-    norm_q = np.linalg.norm(q)
-    norm_m = np.linalg.norm(m)
-    similarity = float(np.dot(q, m) / max(norm_q * norm_m, 1e-9))
-    similarity = max(0.0, min(1.0, similarity))
-
-    decay = (
-        1.0
-        if mem.pinned
-        else engine.scorer.compute_decay(mem.accessed_at, half_life_hours=mem.stability_hours)
-    )
-    bd = engine.scorer.breakdown(
-        similarity=similarity,
-        decay_factor=decay,
-        importance=mem.importance,
-        frequency=mem.frequency,
-    )
-    score = engine.scorer.compute(
-        similarity=similarity,
-        decay_factor=decay,
-        importance=mem.importance,
-        frequency=mem.frequency,
-    )
+    try:
+        bd = await engine.score_breakdown(memory_id, effective_query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if bd is None:
+        raise HTTPException(status_code=404, detail="memory not found")
 
     return {
-        "score": score,
+        "score": bd.total_hscore,
         "components": {
-            "similarity_penalty": bd["alpha_component"],
-            "decay_penalty": bd["beta_component"],
-            "importance_penalty": bd["gamma_component"],
-            "frequency_penalty": bd["delta_component"],
+            "similarity_penalty": bd.alpha_component,
+            "decay_penalty": bd.beta_component,
+            "importance_penalty": bd.gamma_component,
+            "frequency_penalty": bd.delta_component,
         },
         "weights": {
             "alpha": engine.scorer.w.alpha,

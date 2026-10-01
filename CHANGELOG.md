@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Feature: recall quality from the store's own recall log (#336)
+
+- `recall_log` has recorded every recall's ranked result ids since it landed,
+  with a docstring saying the number it exists to produce is *"of the memories
+  I was handed, how many were worth having"* — and nothing computed it. The new
+  `levh recall-report` does, offline and deterministically.
+- The score is an **existence-and-retention proxy**, not precision against
+  labelled relevance, and it is not a bound in either direction: a returned
+  memory counts as a hit when it still resolves in `memories` and its question
+  has not since stopped returning it, so an irrelevant-but-live result scores
+  as a hit, and a memory re-ranked away counts as churn. The report says all of
+  this in its own `limits` field rather than implying a labelled score; read the
+  trend across runs on one store, not the absolute number.
+- Churn is keyed on query text, project and top_k, so the same question under a
+  different project or window cannot contaminate it. `session_id` is
+  deliberately excluded — the store is shared across sessions, and
+  "this question stopped returning this memory" is a store-level fact.
+  `min_importance` is not stored in `recall_log`, so it is a noted deferral.
+- `server/core/recall_quality.py` is pure (`build_recall_report` takes rows and
+  an id set, no DB and no clock), so the report is byte-identical across runs;
+  the window is the log's own oldest/newest row, never the time it ran.
+- `--json` prints the full report; `--output` also writes it to disk, with its
+  status line on stderr so stdout stays valid JSON for a pipe. An empty log
+  prints "no recalls logged", not a precision of 0.0 — nothing was asked is not
+  everything failed.
+
 ### Feature: response schemas for the full REST surface (#307, #309)
 
 - The published contract declared request bodies precisely but left every `200`

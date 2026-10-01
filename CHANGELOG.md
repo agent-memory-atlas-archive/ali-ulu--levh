@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+### Fix: a global guard rule reaches a project-scoped check (#337)
+
+- `list_rules` passed `project` straight through to `search_memories`, which
+  filters `memories.project = ?` exactly — so a rule recorded *without* a
+  project was invisible to a project-scoped `check_action`, and the gate could
+  return `allow` for the one mistake that applies everywhere. A global rule is
+  the most general kind, not the least.
+- The merge is done **in the query**, not on the results. `search_memories` now
+  takes `include_global` and widens `project = ?` to
+  `(project = ? OR project IS NULL)` inside the same `WHERE`; `episodic.search`
+  forwards it; `list_rules` sets it. Filtering a fetched page in Python would
+  have been wrong: the query applies a `LIMIT`, so a page of pinned memories
+  from other projects — none of which carry `RULE_TAG` — would have filled it
+  and the applicable global rule would never have reached `check_action`.
+- The flag defaults to `False`, so exact project filtering is untouched for
+  every other memory search; the guard is the one caller that opts in.
+  `include_global=False` still gives a strict single-project view.
+
+### Feature: pre-action judgment gate — check a proposed action against recorded rules (#337)
+
+- `guard.py` recorded a corrected mistake as a pinned rule plus a violation row,
+  and its docstring drew an explicit line: deciding whether a *proposed* action
+  violates a rule is a different problem, needing a latency budget and a
+  false-positive story. `check_action` is the first thing to cross that line,
+  on the terms the docstring set.
+- The matcher is **deterministic and model-free** — the same lexical,
+  stem-aware overlap `lexical.py` and `conflict.py` already use. No network, no
+  LLM, nothing on the hot path that can fail closed. It lives in
+  `server/core/action_gate.py` as a pure function, so the decision is testable
+  without a database.
+- The verdict is **advisory**: `warn` or `allow`, never `block`. A warning says
+  "this overlaps something you got wrong before"; whether that is an
+  instruction stays the caller's policy, so the gate does not become a
+  permission system.
+- Matching is narrow on purpose. A rule's `wrong_action` and its `task` are
+  scored **separately** and the stronger wins, so a terse sharp rule is not
+  diluted by a verbose task; a match needs at least two shared content words
+  and 60% coverage of one description. An unrelated action is silent, which is
+  the property that keeps the one warning that matters from being dismissed
+  with the rest.
+- Read-only: it touches no counter, decay clock or violation row, so asking a
+  question cannot change the answer it reads.
+- Surfaces: `POST /api/guard/check`, the `check_action` MCP tool (in the
+  `work` profile — a gate consulted only in admin sessions is consulted too
+  late), and `GuardService.check_action`.
+
 ### Feature: recall quality from the store's own recall log (#336)
 
 - `recall_log` has recorded every recall's ranked result ids since it landed,

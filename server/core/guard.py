@@ -11,6 +11,14 @@ a *proposed* action violates a rule is a different problem — it runs on the ho
 path in front of every tool call, so it needs a latency budget and a
 false-positive story that recorded data can inform but this layer cannot
 assume.
+
+That line was drawn in an earlier release; :meth:`GuardService.check_action`
+is the first thing to cross it, and it does so on the terms the paragraph
+above set. The matching itself lives in :mod:`server.core.action_gate` as a
+pure function — no model, no network — and the verdict it returns is
+*advisory*: ``warn`` or ``allow``, never ``block``. Whether a warning is an
+instruction stays the caller's policy, so this layer still does not decide
+what an agent is permitted to do.
 """
 
 from __future__ import annotations
@@ -18,6 +26,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from . import action_gate
 from .database import Database
 from .memory_engine import MemoryEngine
 from .types import RULE_TAG, Memory
@@ -139,11 +148,86 @@ class GuardService:
             limit=max(1, min(limit, 500)),
         )
 
-    async def list_rules(self, project: str | None = None, limit: int = 50) -> list[Memory]:
-        """Return the pinned rules mistakes have produced, most important first."""
+    async def list_rules(
+        self,
+        project: str | None = None,
+        limit: int = 50,
+        include_global: bool = True,
+    ) -> list[Memory]:
+        """Return the pinned rules mistakes have produced, most important first.
+
+        ``project`` narrows the list to rules recorded against that project
+        **plus the global rules recorded without one**. The merge is the point:
+        ``search_memories`` filters ``project = ?`` exactly, so a rule recorded
+        without a project would otherwise be invisible to a project-scoped
+        caller — and a global rule is the *most* general kind, not the least.
+        A mistake like force-pushing to ``main`` must warn everywhere.
+
+        The merge is pushed into the query (``include_global``) rather than
+        applied to the results, because the query applies a ``LIMIT``: a page
+        fetched first and filtered in Python can be filled entirely by pinned
+        memories that are not rules at all, and the global rule that applies
+        would never reach ``check_action``. A memory is a rule only when it
+        carries ``RULE_TAG``, which is a Python-side test, so the SQL filter
+        still admits non-rules — the ``limit * 4`` headroom is what covers
+        them, and the scoping above is what keeps the headroom from being spent
+        on other projects.
+
+        Pass ``include_global=False`` for a strict single-project view. Exact
+        project filtering is untouched for every other memory search; the merge
+        lives here, in the guard.
+        """
         pinned = await self.engine.episodic.search(
-            project=project, pinned=True, limit=max(limit * 4, 100)
+            project=project,
+            # The global rules are folded into the query itself, before its
+            # LIMIT, so unrelated pinned rows in other projects cannot crowd
+            # out the global rule that actually applies.
+            include_global=project is not None and include_global,
+            pinned=True,
+            limit=max(limit * 4, 100),
         )
         rules = [m for m in pinned if RULE_TAG in (m.tags or [])]
         rules.sort(key=lambda m: (m.importance, m.created_at), reverse=True)
         return rules[:limit]
+
+    async def check_action(
+        self,
+        tool_name: str,
+        action_text: str,
+        project: str | None = None,
+        limit: int = 200,
+    ) -> dict:
+        """Judge a *proposed* action against the rules on record.
+
+        Read-only: it touches no counter, no decay clock and no violation row.
+        A gate that mutates the store would make the act of asking a question
+        change the answer, and it would run on every tool call.
+
+        ``project`` scopes the rules the way :meth:`list_rules` does: rules
+        recorded against that project **plus the global ones recorded without
+        a project**. A rule with no project is the most general kind — a
+        mistake about force-pushing to ``main`` must warn everywhere — so
+        scoping narrows the gate without hiding it from the rules that apply
+        to everyone.
+
+        The verdict is advisory (see :mod:`server.core.action_gate`): ``warn``
+        when a rule overlaps the action, ``allow`` otherwise. Never ``block``.
+        """
+        rules = await self.list_rules(project=project, limit=limit)
+        verdict = action_gate.check_action(
+            tool_name,
+            action_text,
+            (
+                {
+                    "id": m.id,
+                    "statement": m.content,
+                    "task": (m.metadata or {}).get("task", ""),
+                    "wrong_action": (m.metadata or {}).get("wrong_action", ""),
+                    "severity": (m.metadata or {}).get("severity", DEFAULT_SEVERITY),
+                }
+                for m in rules
+            ),
+        )
+        verdict["tool_name"] = tool_name
+        verdict["project"] = project
+        return verdict

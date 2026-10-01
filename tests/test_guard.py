@@ -180,3 +180,160 @@ async def test_a_project_scoped_rule_stays_in_its_project(guard, engine):
 
     assert "Do not used git commit" in await engine.generate_context_file(project="levh")
     assert "Do not used git commit" not in await engine.generate_context_file(project="other")
+
+
+# ── Pre-action gate (#337) ────────────────────────────────────────────
+#
+# The gate reads the same rules `record_mistake` writes, so these tests drive
+# the real service end to end: record a mistake, then judge an action against
+# it. The unit-level false-positive story lives in tests/test_action_gate.py;
+# what is checked here is that the wiring preserves it.
+
+
+@pytest.mark.asyncio
+async def test_a_recorded_mistake_warns_a_matching_action(guard):
+    await _record(guard, task="commit the README", wrong_action="used git commit --no-verify")
+
+    verdict = await guard.check_action("Bash", "git commit --no-verify -m 'wip'")
+
+    assert verdict["decision"] == "warn"
+    assert verdict["checked_rules"] == 1
+    assert verdict["matched_rules"][0]["severity"] == "medium"
+    assert "no-verify" in verdict["matched_rules"][0]["statement"]
+
+
+@pytest.mark.asyncio
+async def test_an_unrelated_action_is_allowed(guard):
+    await _record(guard, task="commit the README", wrong_action="used git commit --no-verify")
+
+    verdict = await guard.check_action("Bash", "pytest -q tests/")
+
+    assert verdict["decision"] == "allow"
+    assert verdict["matched_rules"] == []
+    # It still looked — "allow" means "checked and nothing matched".
+    assert verdict["checked_rules"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_gate_is_read_only(engine, guard):
+    """Asking must not change the answer. The gate runs in front of every tool
+    call, so a gate that mutated the store would corrupt the signal it reads."""
+    await _record(guard, task="commit the README", wrong_action="used git commit --no-verify")
+    before = await engine.get_stats()
+
+    await guard.check_action("Bash", "git commit --no-verify -m 'wip'")
+    await guard.check_action("Bash", "pytest -q")
+
+    after = await engine.get_stats()
+    assert after.total_memories == before.total_memories
+    assert after.pinned_count == before.pinned_count
+
+
+@pytest.mark.asyncio
+async def test_no_rules_yet_allows_with_a_reason_that_says_so(guard):
+    verdict = await guard.check_action("Bash", "git push --force origin main")
+
+    assert verdict["decision"] == "allow"
+    assert verdict["checked_rules"] == 0
+    assert "no rules recorded" in verdict["reason"]
+
+
+@pytest.mark.asyncio
+async def test_verdict_echoes_what_it_judged(guard):
+    await _record(guard)
+    verdict = await guard.check_action("Bash", "git commit --no-verify", project="levh")
+
+    assert verdict["tool_name"] == "Bash"
+    assert verdict["project"] == "levh"
+
+
+@pytest.mark.asyncio
+async def test_a_global_rule_warns_a_project_scoped_check(guard):
+    """A rule recorded without a project is the *most* general kind, so it must
+    reach a project-scoped caller. `search_memories` filters `project = ?`
+    exactly, so without the merge a global rule would be invisible here — the
+    gate would return `allow` for the one mistake that applies everywhere."""
+    await _record(
+        guard,
+        task="push the release branch",
+        wrong_action="used git push --force origin main",
+        project=None,
+    )
+
+    verdict = await guard.check_action(
+        "Bash", "git push --force origin main", project="levh"
+    )
+
+    assert verdict["decision"] == "warn"
+    assert verdict["checked_rules"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_rule_from_another_project_is_not_merged_in(guard):
+    """Merging global rules must not merge *every* rule: a rule recorded for a
+    different project stays out of a project-scoped check."""
+    await _record(
+        guard,
+        task="push the release branch",
+        wrong_action="used git push --force origin main",
+        project="other-project",
+    )
+
+    verdict = await guard.check_action(
+        "Bash", "git push --force origin main", project="levh"
+    )
+
+    assert verdict["decision"] == "allow"
+    assert verdict["checked_rules"] == 0
+
+
+@pytest.mark.asyncio
+async def test_strict_project_scope_can_exclude_global_rules(guard):
+    await _record(
+        guard,
+        task="push the release branch",
+        wrong_action="used git push --force origin main",
+        project=None,
+    )
+
+    rules = await guard.list_rules(project="levh", include_global=False)
+
+    assert rules == []
+
+
+@pytest.mark.asyncio
+async def test_unrelated_pinned_memories_cannot_starve_the_global_rule(guard):
+    """The scope filter has to run before the query's LIMIT.
+
+    ``search_memories`` returns a page of at most ``limit`` rows, and the guard
+    only keeps the ones carrying ``RULE_TAG``. If the global merge were applied
+    to that page in Python instead of in the query, a flood of pinned memories
+    from other projects — which are not rules — would fill the page and the one
+    global rule that applies would never reach ``check_action``, which would
+    then return ``allow`` for a mistake recorded everywhere.
+
+    Pinned rows sort first, so without SQL-level scoping these 200 crowd the
+    global rule out of every page the default limit can afford.
+    """
+    await _record(
+        guard,
+        task="push the release branch",
+        wrong_action="used git push --force origin main",
+        project=None,
+    )
+    for i in range(200):
+        await guard.engine.store(
+            f"pinned note from another project {i}",
+            memory_type="episodic",
+            project="other-project",
+            pinned=True,
+            importance=0.9,
+        )
+
+    verdict = await guard.check_action(
+        "Bash", "git push --force origin main", project="levh"
+    )
+
+    assert verdict["decision"] == "warn"
+    assert verdict["checked_rules"] == 1
+

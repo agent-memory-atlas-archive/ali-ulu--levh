@@ -86,6 +86,18 @@ def test_rules_can_be_scoped_to_a_project(client):
     assert client.get("/api/guard/rules", params={"project": "other"}).json()["rules"] == []
 
 
+def test_a_global_rule_is_listed_for_every_project(client):
+    """A rule recorded without a project applies everywhere, so scoping the
+    list must not hide it from a project-scoped caller."""
+    _record(client, project=None)
+
+    levh = client.get("/api/guard/rules", params={"project": "levh"}).json()["rules"]
+    other = client.get("/api/guard/rules", params={"project": "other"}).json()["rules"]
+
+    assert len(levh) == 1 and levh[0]["project"] is None
+    assert len(other) == 1
+
+
 def test_an_incomplete_mistake_is_rejected(client):
     res = _record(client, correct_action="")
     assert res.status_code == 422
@@ -109,3 +121,56 @@ def test_guard_endpoints_require_the_token_when_one_is_set(monkeypatch, tmp_path
     finally:
         monkeypatch.delenv("LEVH_TOKEN", raising=False)
         importlib.reload(api)
+
+
+# ── POST /api/guard/check — the pre-action gate (#337) ────────────────
+
+
+def _check(client, **overrides):
+    payload = {"tool_name": "Bash", "action_text": "git commit --no-verify -m wip"}
+    payload.update(overrides)
+    return client.post("/api/guard/check", json=payload)
+
+
+def test_check_warns_on_a_recorded_mistake(client):
+    _record(client)
+
+    body = _check(client).json()
+
+    assert body["decision"] == "warn"
+    assert body["checked_rules"] == 1
+    assert body["tool_name"] == "Bash"
+    assert body["matched_rules"][0]["rule_id"]
+    assert body["matched_rules"][0]["matched_terms"]
+
+
+def test_check_allows_an_unrelated_action(client):
+    _record(client)
+
+    body = _check(client, action_text="pytest -q tests/").json()
+
+    assert body["decision"] == "allow"
+    assert body["matched_rules"] == []
+
+
+def test_check_never_blocks(client):
+    """Issue #337's false-positive policy is encoded here: the gate is
+    advisory. A `block` verdict would make LEVH an enforcement layer."""
+    _record(client, severity="critical")
+
+    assert _check(client).json()["decision"] != "block"
+
+
+def test_check_requires_an_action_text(client):
+    assert client.post("/api/guard/check", json={"tool_name": "Bash"}).status_code == 422
+
+
+def test_check_is_read_only(client):
+    """Asking must not record anything — no violation, no memory."""
+    _record(client)
+    before = client.get("/api/guard/violations").json()
+
+    _check(client)
+
+    assert client.get("/api/guard/violations").json() == before
+

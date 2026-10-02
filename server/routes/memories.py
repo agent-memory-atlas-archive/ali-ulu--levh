@@ -82,6 +82,8 @@ async def list_memories(
     pinned: str = "",
     q: str = "",
     min_importance: float = 0.0,
+    as_of: str = "",
+    include_superseded: bool = False,
     limit: int = 50,
     offset: int = 0, engine=Depends(get_engine)):
     memories = await engine.list_memories(
@@ -93,6 +95,8 @@ async def list_memories(
         pinned={"true": True, "false": False}.get(pinned.lower(), None),
         min_importance=min_importance if min_importance > 0 else None,
         content_like=q or None,
+        as_of=as_of or None,
+        include_superseded=include_superseded,
         limit=limit,
         offset=offset,
     )
@@ -214,6 +218,8 @@ async def recall_memories(req: RecallRequest, engine=Depends(get_engine)):
         # what everyone else sees.
         reinforce=False if public_demo() else req.reinforce,
         explain=req.explain,
+        as_of=req.as_of,
+        include_superseded=req.include_superseded,
     )
     attachments_by_memory = await engine.db.list_attachments_for_memories(
         [m.id for m in result.memories]

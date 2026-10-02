@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from .helpers import logger
 from .. import metrics
+from ..env import get_env
 from ..lexical import mutual_similarity
 from ..types import (
     Memory,
@@ -36,6 +37,26 @@ from ..types import (
 # scoped fact does not demote the real one (see tests/test_lexical_recall.py
 # and tests/test_superseded_demotion.py).
 _LEXICAL_INTERFERENCE_FLOOR = 0.65
+
+
+def _retirement_enabled() -> bool:
+    """Whether the supersession pass retires facts (issue #335).
+
+    Off by default. Retirement changes what an ordinary read returns, so it is
+    a belief-revision primitive an operator opts into rather than inherits;
+    the issue deliberately scopes the pass "behind a flag". Read at call time,
+    like every other LEVH flag (#143).
+
+    Known limit, and the reason this is a flag rather than a default: the
+    candidate key is near-identical content, which cannot tell a genuine
+    one-value edit ("...is main" -> "...is prod", mutual 0.75) from a
+    templated enumeration ("Distinct content number 3" -> "...number 4",
+    mutual 1.00) — they are lexically identical in shape. With retirement on,
+    a templated pair retires like a supersession. That is acceptable for a
+    prototype an operator turns on deliberately; it is not acceptable as a
+    silent default, which is what the flag encodes.
+    """
+    return get_env("LEVH_SUPERSESSION", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
 class MemoryWriteMixin:
@@ -116,6 +137,10 @@ class MemoryWriteMixin:
             memory_type=mtype,
             metadata=enriched_metadata,
         )
+        # Open the world-time validity window at write (#335). ``created_at``
+        # is the model's own system-time default, so the returned object and
+        # the row agree without a second read.
+        mem.valid_from = mem.created_at
 
         await self.episodic.store(mem)
         if mem.memory_type == MemoryType.SHORT_TERM:
@@ -135,7 +160,17 @@ class MemoryWriteMixin:
         """Retroactive interference: storing something near-identical to an
         older memory weakens the older one — the new information supersedes it.
         Pinned memories are immune, and interference stays within the same
-        project so unrelated workspaces never affect each other."""
+        project so unrelated workspaces never affect each other.
+
+        Two effects live here, and #335 separates them:
+
+        * **Weakening** (always) — lowers the older memory's stability so it
+          decays faster from now on. Wide and harmless: it never changes what
+          a read returns.
+        * **Retirement** (opt-in) — closes the older memory's validity window
+          (``valid_to``/``superseded_by``) so it stops being *current*. This
+          changes read behaviour, so it is gated behind ``LEVH_SUPERSESSION``.
+        """
         if not new_memory.embedding or self.interference_threshold >= 1.0:
             return []
 
@@ -146,6 +181,7 @@ class MemoryWriteMixin:
                 and m.project == new_memory.project
             )
 
+        retire_enabled = _retirement_enabled()
         similar = self._interference_candidates(new_memory, _candidate)
         interfered: list[str] = []
         for old, similarity in similar:
@@ -159,18 +195,12 @@ class MemoryWriteMixin:
             # SQLite contention here must not fail a store the caller already
             # succeeded at. Worst case, one older memory keeps its prior
             # stability a little longer than ideal — not a correctness issue.
-            #
-            # Weakening only changes how fast the old memory will decay from
-            # now on, so today's ranking is untouched: the superseded fact
-            # still ties with, and can outrank, the one that replaced it. The
-            # supersession is recorded so recall can rank it accordingly.
             old.metadata = dict(old.metadata or {})
             old.metadata["superseded_by"] = new_memory.id
             old.metadata["superseded_at"] = datetime.now(timezone.utc).isoformat()
             try:
                 await self.db.update_memory(
-                    old.id,
-                    {"stability_hours": weakened, "metadata": old.metadata},
+                    old.id, {"stability_hours": weakened, "metadata": old.metadata}
                 )
             except sqlite3.OperationalError:
                 logger.warning(
@@ -179,6 +209,32 @@ class MemoryWriteMixin:
                 )
                 continue
             old.stability_hours = weakened
+            # Retirement is the belief revision: close the old fact's validity
+            # window at the moment it was replaced. Gated behind the flag —
+            # a wide interference hit is a weakened neighbour, not a retired
+            # fact, and must stay current so dedupe/consolidation can see it.
+            #
+            # The candidate set is not filtered on validity, so storing C can
+            # select A again after B retired it. The compare-and-set closes the
+            # window only while it is still open: the first retirement wins even
+            # when two concurrent stores both select the same predecessor, so a
+            # loser cannot overwrite the winner's interval (which would erase
+            # the A->B edge and let a later delete reopen a closed window). The
+            # cached copy is updated only when this call is the one that won.
+            if retire_enabled and old.valid_to is None:
+                try:
+                    won = await self.db.retire_if_current(
+                        old.id, old.metadata["superseded_at"], new_memory.id
+                    )
+                except sqlite3.OperationalError:
+                    logger.warning(
+                        "retirement skipped for %s: transient SQLite error",
+                        old.id,
+                    )
+                    won = False
+                if won:
+                    old.valid_to = old.metadata["superseded_at"]
+                    old.superseded_by = new_memory.id
             interfered.append(old.id)
 
         if interfered:
@@ -335,21 +391,26 @@ class MemoryWriteMixin:
 
         ``delete_memory_cascade`` clears it in SQLite, but recall ranks the
         vector store's cached ``Memory`` objects, so a cached predecessor would
-        stay demoted until the next process restart (#78).
+        stay demoted until the next process restart (#78). The temporal fields
+        (#335) need the same treatment: recall's validity predicate reads the
+        cached copy, so a predecessor left with ``valid_to`` set would stay
+        retired even though nothing replaced it any more.
         """
+
+        def _clear(memory: Memory) -> None:
+            metadata = getattr(memory, "metadata", None)
+            if metadata and metadata.get("superseded_by") == replacement_id:
+                memory.metadata = dict(metadata)
+                memory.metadata.pop("superseded_by", None)
+                memory.metadata.pop("superseded_at", None)
+            if getattr(memory, "superseded_by", None) == replacement_id:
+                memory.superseded_by = None
+                memory.valid_to = None
+
         for memory in self.vector_store.memories():
-            metadata = getattr(memory, "metadata", None)
-            if metadata and metadata.get("superseded_by") == replacement_id:
-                memory.metadata = dict(metadata)
-                memory.metadata.pop("superseded_by", None)
-                memory.metadata.pop("superseded_at", None)
-        st = self.short_term.get_all()
-        for memory in st:
-            metadata = getattr(memory, "metadata", None)
-            if metadata and metadata.get("superseded_by") == replacement_id:
-                memory.metadata = dict(metadata)
-                memory.metadata.pop("superseded_by", None)
-                memory.metadata.pop("superseded_at", None)
+            _clear(memory)
+        for memory in self.short_term.get_all():
+            _clear(memory)
 
     def _refresh_memory_caches(self, memory: Memory) -> None:
         """Keep the in-memory layers in sync with a memory that was just

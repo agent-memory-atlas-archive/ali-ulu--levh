@@ -13,6 +13,7 @@ from pathlib import Path
 import aiosqlite
 
 from ..env import get_env
+from ..tenancy import current_workspace_id
 
 
 
@@ -71,16 +72,41 @@ class SnapshotQueries:
         destructive clear occurs until all validation has succeeded.
         """
         attachments = attachments or []
+        workspace = current_workspace_id()
         await self._db.conn.execute("BEGIN IMMEDIATE")
         try:
             memory_ids = [str(m["id"]) for m in memories]
             if replace:
+                # A snapshot restore is a whole-store operation and cannot be
+                # scoped to one workspace: sessions carry no workspace column
+                # yet (phase 2 adds ownership), and the derived tables below are
+                # rebuilt from ``memories`` store-wide. In the degenerate
+                # single-workspace case that is exactly right. Refuse loudly
+                # once a second workspace exists (#302) rather than silently
+                # delete a peer's sessions and derived state. The guard keys on
+                # the memories that can carry a workspace: a session has no
+                # owner to compare against until phase 2, so there is nothing
+                # finer to check — this rejects every store where the
+                # distinction could matter.
+                cursor = await self._db.conn.execute(
+                    "SELECT COUNT(DISTINCT COALESCE(workspace_id, 'default')) FROM memories"
+                )
+                row = await cursor.fetchone()
+                await cursor.close()
+                if row and row[0] > 1:
+                    raise ValueError(
+                        "replace restore is a whole-store operation and is not "
+                        "supported once more than one workspace exists"
+                    )
                 await self._db.conn.execute("DELETE FROM memory_conflict_candidates")
                 await self._db.conn.execute("DELETE FROM memory_trust_scores")
                 await self._db.conn.execute("DELETE FROM memory_entities")
                 await self._db.conn.execute("DELETE FROM entities")
                 # attachments cascades from memories via ON DELETE CASCADE
-                await self._db.conn.execute("DELETE FROM memories")
+                await self._db.conn.execute(
+                    "DELETE FROM memories WHERE COALESCE(workspace_id, 'default') = ?",
+                    (workspace,),
+                )
                 await self._db.conn.execute("DELETE FROM sessions")
             elif memory_ids:
                 placeholders = ",".join("?" for _ in memory_ids)
@@ -121,9 +147,9 @@ class SnapshotQueries:
                     """
                     INSERT OR REPLACE INTO memories
                         (id, content, memory_type, embedding, importance, frequency,
-                         tags, session_id, project, source, pinned, metadata, hscore,
+                         tags, session_id, project, workspace_id, source, pinned, metadata, hscore,
                          created_at, accessed_at, decay_factor, stability_hours, recall_count)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         memory["id"],
@@ -135,6 +161,7 @@ class SnapshotQueries:
                         json.dumps(memory.get("tags", []) or []),
                         memory.get("session_id"),
                         memory.get("project"),
+                        workspace,
                         memory.get("source"),
                         1 if memory.get("pinned") else 0,
                         json.dumps(memory.get("metadata", {}) or {}),

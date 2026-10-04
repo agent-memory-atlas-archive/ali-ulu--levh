@@ -13,7 +13,7 @@ from pathlib import Path
 import aiosqlite
 
 from ..env import get_env
-from ..tenancy import current_workspace_id
+from ..tenancy import authorize, current_workspace_id
 
 
 
@@ -29,6 +29,7 @@ class SnapshotQueries:
         Uses SQLite's online backup API, so WAL pages are included correctly.
         In-memory databases have no durable location and therefore return None.
         """
+        authorize("backup_restore", current_workspace_id())
         if self._db.db_path == ":memory:":
             return None
 
@@ -71,6 +72,7 @@ class SnapshotQueries:
         Callers must validate every record before entering this method.  No
         destructive clear occurs until all validation has succeeded.
         """
+        authorize("backup_restore", current_workspace_id())
         attachments = attachments or []
         workspace = current_workspace_id()
         await self._db.conn.execute("BEGIN IMMEDIATE")

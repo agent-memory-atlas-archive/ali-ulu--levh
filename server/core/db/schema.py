@@ -35,7 +35,7 @@ def default_db_path() -> str:
     return os.path.abspath(get_env("SQLITE_DB_PATH", DEFAULT_DB_FILENAME))
 
 
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 
 
 _TABLES = """
@@ -198,6 +198,7 @@ CREATE TABLE IF NOT EXISTS held_memories (
     tags_json          TEXT NOT NULL,
     session_id         TEXT,
     project            TEXT,
+    workspace_id       TEXT NOT NULL DEFAULT 'default',
     source             TEXT,
     memory_type        TEXT NOT NULL,
     pinned             INTEGER NOT NULL DEFAULT 0,
@@ -260,6 +261,9 @@ CREATE TABLE IF NOT EXISTS recall_log (
     top_k        INTEGER NOT NULL,
     project      TEXT,
     session_id   TEXT,
+    workspace_id TEXT NOT NULL DEFAULT 'default',
+    principal_id TEXT NOT NULL DEFAULT 'local',
+    principal_role TEXT NOT NULL DEFAULT 'admin',
     reinforced   INTEGER NOT NULL DEFAULT 0,
     logged_at    TEXT NOT NULL
 );
@@ -395,12 +399,16 @@ CREATE INDEX IF NOT EXISTS idx_viol_when     ON violations(occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_attach_memory ON attachments(memory_id);
 -- The queue is read as "what is still waiting", newest first.
 CREATE INDEX IF NOT EXISTS idx_held_status ON held_memories(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_held_workspace_status
+    ON held_memories(workspace_id, status, created_at DESC);
 -- The inbox is read as "what is still open", most recently seen first.
 CREATE INDEX IF NOT EXISTS idx_find_status ON findings(status, last_seen_at DESC);
 -- The recall log is read two ways: "what did we just ask" (recency, and the
 -- retention prune) and "how did we do on this question" (group by digest).
 CREATE INDEX IF NOT EXISTS idx_recall_log_when ON recall_log(logged_at DESC);
 CREATE INDEX IF NOT EXISTS idx_recall_log_sha  ON recall_log(query_sha256);
+CREATE INDEX IF NOT EXISTS idx_recall_log_workspace_when
+    ON recall_log(workspace_id, logged_at DESC);
 -- The continuity log is read as "recent emissions first" (stats windows) and
 -- "one project's emissions" (per-project brief counts).
 CREATE INDEX IF NOT EXISTS idx_continuity_when    ON continuity_log(emitted_at DESC);

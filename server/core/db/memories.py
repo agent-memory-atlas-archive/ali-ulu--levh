@@ -14,7 +14,7 @@ from typing import Optional
 import aiosqlite
 
 from server.core.lexical import terms as lexical_terms
-from server.core.tenancy import DEFAULT_WORKSPACE_ID, current_workspace_id
+from server.core.tenancy import DEFAULT_WORKSPACE_ID, authorize, current_workspace_id
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,12 @@ class MemoryQueries:
         """
         return current_workspace_id()
 
+    @classmethod
+    def _authorize(cls, action: str) -> None:
+        authorize(action, cls._workspace())
+
     async def insert_memory(self, memory: dict) -> None:
+        self._authorize("store")
         # The tenancy boundary is set by the store, never by the caller's dict
         # (#302): a caller cannot write a row into a workspace other than the
         # one its request is scoped to. The context default (``default``) keeps
@@ -102,6 +107,7 @@ class MemoryQueries:
         await self._db.commit()
 
     async def get_memory(self, memory_id: str) -> Optional[dict]:
+        self._authorize("read")
         cursor = await self._db.conn.execute(
             "SELECT * FROM memories WHERE id = ? AND COALESCE(workspace_id, 'default') = ?",
             (memory_id, self._workspace()),
@@ -123,6 +129,7 @@ class MemoryQueries:
         mirror. A caller that lists memories for a user must use
         ``search_memories``, which is always scoped.
         """
+        self._authorize("export_full" if across_workspaces else "read")
         if across_workspaces:
             cursor = await self._db.conn.execute(
                 "SELECT * FROM memories ORDER BY created_at DESC LIMIT ?", (limit,)
@@ -156,6 +163,7 @@ class MemoryQueries:
         that pages with ``limit`` never skips a row. Not workspace-scoped: the
         delta summarizes the whole mirror, like ``across_workspaces`` above.
         """
+        self._authorize("export_full")
         cursor = await self._db.conn.execute(
             "SELECT rowid AS _rowid, * FROM memories "
             "WHERE rowid > ? ORDER BY rowid ASC LIMIT ?",
@@ -187,6 +195,7 @@ class MemoryQueries:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
+        self._authorize("read")
         fts_query = self._db._fts_query(content_like or "") if content_like else ""
         use_fts = bool(content_like and fts_query and self._db.fts5_available)
         query = (
@@ -293,6 +302,7 @@ class MemoryQueries:
         dropped first so the OR is not swamped by function words. Empty when
         FTS5 is unavailable, so callers fall back cleanly.
         """
+        self._authorize("read")
         fts_query = self._fts_or_query(query)
         if not fts_query or not self._db.fts5_available:
             return []
@@ -326,6 +336,7 @@ class MemoryQueries:
         ``row_to_memory_dict`` is applied per row (never raw) so a caller sees
         model-shaped values, exactly like ``get_memory``.
         """
+        self._authorize("read")
         if not memory_ids:
             return []
         placeholders = ",".join("?" for _ in memory_ids)
@@ -348,6 +359,7 @@ class MemoryQueries:
         ``Embedder.is_semantic``). Filtered by ``project`` so a literal re-store
         in one workspace does not shadow the same text in another.
         """
+        self._authorize("read")
         query = "SELECT 1 FROM memories WHERE content = ? AND COALESCE(workspace_id, 'default') = ?"
         params: list = [content, self._workspace()]
         if project is not None:
@@ -360,6 +372,7 @@ class MemoryQueries:
         return row is not None
 
     async def update_memory(self, memory_id: str, updates: dict) -> bool:
+        self._authorize("update")
         sets = []
         params = []
         for key, val in updates.items():
@@ -399,6 +412,7 @@ class MemoryQueries:
         win atomically; ``rowcount`` tells the caller whether it was the one
         that closed the window, so only that caller updates its cached copy.
         """
+        self._authorize("update")
         cursor = await self._db.conn.execute(
             "UPDATE memories SET valid_to = ?, superseded_by = ? "
             "WHERE id = ? AND valid_to IS NULL "
@@ -409,6 +423,7 @@ class MemoryQueries:
         return cursor.rowcount > 0
 
     async def delete_memory(self, memory_id: str) -> bool:
+        self._authorize("forget")
         cursor = await self._db.conn.execute(
             "DELETE FROM memories WHERE id = ? AND COALESCE(workspace_id, 'default') = ?",
             (memory_id, self._workspace()),
@@ -423,6 +438,7 @@ class MemoryQueries:
         report success while entity, trust or conflict residues survive.
         Orphan entity rows are pruned after their final link disappears.
         """
+        self._authorize("forget")
         workspace = self._workspace()
         # Refuse before touching anything when the id is not in this workspace
         # (#302): the derived-row deletes below are keyed by memory id alone, so
@@ -498,6 +514,7 @@ class MemoryQueries:
 
     async def memory_residue(self, memory_id: str) -> dict:
         """Return row counts for all persistent layers referencing a memory."""
+        self._authorize("read")
         checks = {
             "episodic": ("SELECT COUNT(*) FROM memories WHERE id = ?", (memory_id,)),
             "entity_links": (

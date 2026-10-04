@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
 import tempfile
 
 import pytest
@@ -34,7 +35,9 @@ os.environ["EMBEDDER_MODE"] = "hash"
 
 from server.core.db.recall_log import PRUNE_INTERVAL_SECONDS
 from server.core.engine.recall import MAX_QUERY_CHARS
+from server.core.database import CURRENT_SCHEMA_VERSION, Database
 from server.core.memory_engine import MemoryEngine
+from server.core.tenancy import AuthorizationError, Principal, bind_principal, reset_principal
 
 SECRET = "sk-proj-abc123DEF456ghi789JKL0"
 
@@ -69,6 +72,52 @@ async def test_a_recall_records_a_row_by_default(engine):
     assert len(rows) == 1, "a recall with logging on by default must leave a row"
     assert rows[0]["result_ids"] == [m.id for m in result.memories]
     assert rows[0]["result_count"] == len(result.memories)
+
+
+@pytest.mark.asyncio
+async def test_recall_audit_stamps_principal_and_workspace_and_filters_peers(engine):
+    row = {
+        "query": "where is the rollout plan",
+        "query_sha256": "f" * 64,
+        "result_ids": ["memory-42", "memory-7"],
+        "result_count": 2,
+        "top_k": 3,
+        "project": "launch",
+        "session_id": "session-1",
+        "reinforced": False,
+        # Caller-supplied identity must never win over the request context.
+        "workspace_id": "forged",
+        "principal_id": "forged",
+        "principal_role": "admin",
+    }
+
+    token = bind_principal(
+        Principal(id="backend-agent", workspace_id="team-42", role="viewer", agent="backend")
+    )
+    try:
+        await engine.db.recall_log.record_recall(row)
+        rows = await engine.db.list_recall_log(limit=5)
+        assert rows[0]["workspace_id"] == "team-42"
+        assert rows[0]["principal_id"] == "backend-agent"
+        assert rows[0]["principal_role"] == "viewer"
+
+        audit = await engine.db.access_audit("memory-42")
+        assert audit == [
+            {
+                "memory_id": "memory-42",
+                "principal_id": "backend-agent",
+                "principal_role": "viewer",
+                "workspace_id": "team-42",
+                "project": "launch",
+                "session_id": "session-1",
+                "rank": 1,
+                "logged_at": rows[0]["logged_at"],
+            }
+        ]
+    finally:
+        reset_principal(token)
+
+    assert await engine.db.list_recall_log(limit=5) == []
 
 
 @pytest.mark.asyncio
@@ -336,3 +385,106 @@ async def test_stats_separate_volume_from_variety(engine):
     assert stats["newest"] >= stats["oldest"]
     assert json.dumps(stats, sort_keys=True), "stats must stay JSON-serialisable for the API"
 
+
+
+@pytest.mark.asyncio
+async def test_recall_log_pruning_is_admin_only(engine):
+    await engine.db.recall_log.record_recall(
+        {
+            "query": "keep audit evidence protected",
+            "query_sha256": "b" * 64,
+            "result_ids": [],
+            "result_count": 0,
+            "top_k": 3,
+            "project": None,
+            "session_id": None,
+            "reinforced": False,
+        }
+    )
+
+    token = bind_principal(
+        Principal(id="reader", workspace_id="default", role="viewer")
+    )
+    try:
+        with pytest.raises(AuthorizationError):
+            await engine.db.prune_recall_log(max_days=1)
+    finally:
+        reset_principal(token)
+
+
+@pytest.mark.asyncio
+async def test_v5_recall_log_migrates_to_principal_audit_without_losing_rows(tmp_path):
+    path = str(tmp_path / "v5.db")
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE recall_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query TEXT NOT NULL,
+            query_sha256 TEXT NOT NULL,
+            result_ids TEXT NOT NULL,
+            result_count INTEGER NOT NULL,
+            top_k INTEGER NOT NULL,
+            project TEXT,
+            session_id TEXT,
+            reinforced INTEGER NOT NULL DEFAULT 0,
+            logged_at TEXT NOT NULL
+        );
+        INSERT INTO recall_log
+            (query, query_sha256, result_ids, result_count, top_k,
+             project, session_id, reinforced, logged_at)
+        VALUES
+            ('legacy question', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+             '["legacy-memory"]', 1, 3, NULL, NULL, 0,
+             '2026-01-01T00:00:00+00:00');
+
+        CREATE TABLE held_memories (
+            id TEXT PRIMARY KEY,
+            content TEXT NOT NULL,
+            importance REAL NOT NULL,
+            tags_json TEXT NOT NULL,
+            session_id TEXT,
+            project TEXT,
+            source TEXT,
+            memory_type TEXT NOT NULL,
+            pinned INTEGER NOT NULL DEFAULT 0,
+            metadata_json TEXT NOT NULL,
+            reasons_json TEXT NOT NULL,
+            max_similarity REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'held',
+            created_at TEXT NOT NULL,
+            decided_at TEXT,
+            admitted_memory_id TEXT
+        );
+        INSERT INTO held_memories
+            (id, content, importance, tags_json, session_id, project, source,
+             memory_type, pinned, metadata_json, reasons_json, max_similarity,
+             status, created_at, decided_at, admitted_memory_id)
+        VALUES
+            ('legacy-held', 'legacy candidate', 0.7, '[]', NULL, 'legacy',
+             'import', 'episodic', 0, '{}', '["duplicate_near"]', 0.91,
+             'held', '2026-01-01T00:00:00+00:00', NULL, NULL);
+
+        PRAGMA user_version = 5;
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    await db.connect()
+    try:
+        assert db.schema_version == CURRENT_SCHEMA_VERSION == 6
+        rows = await db.list_recall_log(limit=5)
+        assert len(rows) == 1
+        assert rows[0]["query"] == "legacy question"
+        assert rows[0]["workspace_id"] == "default"
+        assert rows[0]["principal_id"] == "local"
+        assert rows[0]["principal_role"] == "admin"
+
+        held = await db.list_held_memories()
+        assert len(held) == 1
+        assert held[0]["id"] == "legacy-held"
+        assert held[0]["workspace_id"] == "default"
+    finally:
+        await db.close()

@@ -80,6 +80,13 @@ const CONNECTOR_META: Record<
   },
 };
 
+CONNECTOR_META.slack = {
+  icon: MessageSquare,
+  color: "text-sky-500",
+  description: "settings.connectors.slack.description",
+  category: CONNECTOR_META.calendar.category,
+};
+
 const CATEGORY_COLORS: Record<string, string> = {
   Files: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Productivity: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
@@ -390,7 +397,7 @@ export function Connectors() {
                   {selConnector.replace(/_/g, " ")}
                 </p>
                 <p className="text-[11px] text-muted-foreground">
-                  {activeMeta?.description || activeConnector.description}
+                  {t(activeMeta?.description || activeConnector.description)}
                 </p>
               </div>
             </div>

@@ -163,12 +163,19 @@ class AgentTracker:
         result = await self.usage.get_project_collaboration(project)
         handoffs = await self.team.list_handoffs(project=project, limit=20)
         decisions = await self.team.list_decisions(project=project, limit=20)
+        decision_conflicts = await self.team.list_decision_conflicts(
+            project=project,
+            status="open",
+            limit=20,
+        )
         result["handoffs"] = handoffs
         result["decisions"] = decisions
+        result["decision_conflicts"] = decision_conflicts
         result["pending_handoffs"] = sum(1 for h in handoffs if h["status"] == "pending")
         result["contested_decisions"] = sum(
             1 for d in decisions if d["status"] == "contested"
         )
+        result["open_decision_conflicts"] = len(decision_conflicts)
         return result
 
     async def create_handoff(self, **kwargs) -> dict:
@@ -191,3 +198,12 @@ class AgentTracker:
 
     async def resolve_team_decision(self, decision_id: str) -> dict:
         return await self.team.resolve_decision(decision_id)
+
+    async def detect_team_decision_conflicts(self, **kwargs) -> dict:
+        return await self.team.detect_decision_conflicts(**kwargs)
+
+    async def list_team_decision_conflicts(self, **kwargs) -> list[dict]:
+        return await self.team.list_decision_conflicts(**kwargs)
+
+    async def review_team_decision_conflict(self, conflict_id: str, action: str) -> dict:
+        return await self.team.review_decision_conflict(conflict_id, action)

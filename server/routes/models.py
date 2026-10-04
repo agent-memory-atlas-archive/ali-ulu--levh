@@ -650,6 +650,35 @@ class TeamDecisionCreateResponse(BaseModel):
     conflicts: list[TeamDecisionOut] = Field(default_factory=list)
 
 
+class TeamDecisionConflictOut(BaseModel):
+    id: str
+    workspace_id: str
+    project: str
+    decision_id_a: str
+    decision_id_b: str
+    signal_type: str
+    confidence: float
+    shared_topics: list[str] = Field(default_factory=list)
+    explanation: dict[str, Any] = Field(default_factory=dict)
+    status: str
+    created_at: str
+    reviewed_at: Optional[str] = None
+    reviewed_by: Optional[str] = None
+
+
+class TeamDecisionConflictDetectResponse(BaseModel):
+    new_candidates: int
+    pairs_examined: int
+    open_total: int
+    stale_resolved: int
+
+
+class TeamDecisionConflictReviewResponse(BaseModel):
+    ok: bool = True
+    action: str
+    conflict: TeamDecisionConflictOut
+
+
 class CollaborationResponse(BaseModel):
     """``GET /api/agents/collaboration/{project}``."""
 
@@ -659,8 +688,10 @@ class CollaborationResponse(BaseModel):
     collaboration_score: int
     handoffs: list[TeamHandoffOut] = Field(default_factory=list)
     decisions: list[TeamDecisionOut] = Field(default_factory=list)
+    decision_conflicts: list[TeamDecisionConflictOut] = Field(default_factory=list)
     pending_handoffs: int = 0
     contested_decisions: int = 0
+    open_decision_conflicts: int = 0
 
 
 # ── Response models: attachments ──────────────────────────────────────

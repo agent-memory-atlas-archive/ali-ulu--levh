@@ -29,8 +29,8 @@ the before/after numbers B needs to show federation did not damage recall.
 
 ### A0. Reconcile the brief's transport inventory — complete (#486)
 
-The client × channel matrix now lives in \`docs/mcp-client-config.md\` and is
-rendered from \`server/continuity_inventory.py\`. Its test reads the same MCP
+The client × channel matrix now lives in `docs/mcp-client-config.md` and is
+rendered from `server/continuity_inventory.py`. Its test reads the same MCP
 platform registry, native-hook support, minimal tool tier and shared MCP start
 instruction used at runtime. It distinguishes LEVH emitting stderr from a
 client consuming it, and records that only Claude Code currently has an

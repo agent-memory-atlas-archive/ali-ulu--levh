@@ -25,6 +25,36 @@ format is silently ignored by those three, so the generator emits each
 client's own format. `tests/test_client_config_formats.py` parses the output
 with the parser the platform actually uses.
 
+## Continuity delivery inventory
+
+This table is code-backed by \`server/continuity_inventory.py\`. “Server emits”
+describes LEVH's stdio behavior, not proof that a particular client displays or
+consumes stderr. Likewise, the MCP start directive is advertised by the server;
+whether a client follows it is client behavior and is measured separately by
+the continuity-use metrics.
+
+<!-- continuity-inventory:start -->
+| Client | Stderr bridge | Native session-start hook | MCP continuity tool/directive |
+| --- | --- | --- | --- |
+| Claude Desktop (Anthropic) | server emits by default | none | tool + start directive by default |
+| Cursor IDE | server emits by default | none | tool + start directive by default |
+| Claude Code (CLI) | server emits by default | opt-in SessionStart | tool + start directive by default |
+| VS Code (with Cline extension) | server emits by default | none | tool + start directive by default |
+| Windsurf | server emits by default | none | tool + start directive by default |
+| Cline (VS Code extension) | server emits by default | none | tool + start directive by default |
+| jcode (CLI) | server emits by default | none | tool + start directive by default |
+| oh-my-pi / omp (CLI) | server emits by default | none | tool + start directive by default |
+| opencode (CLI) | server emits by default | none | tool + start directive by default |
+| Codex CLI (OpenAI) | server emits by default | none | tool + start directive by default |
+| Hermes Agent (Nous Research) | server emits by default | none | tool + start directive by default |
+| Generic MCP client | server emits by default | none | tool + start directive by default |
+<!-- continuity-inventory:end -->
+
+The native hook column means an installer-owned session-start event, not a
+rules file or reminder. Today only Claude Code has that hook. Cursor's installer
+also writes \`.cursorrules\`, and the shell helper is opt-in, but neither is a
+native session-start channel.
+
 ## Claude Desktop
 
 ### Generate config

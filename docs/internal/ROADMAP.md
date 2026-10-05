@@ -38,7 +38,7 @@ numbered findings, and because each one is also a candidate revenue surface.
 | Item | Topic | State | Next step | Reference |
 | --- | --- | --- | --- | --- |
 | connectors | Slack sync connector | done | — | #421 |
-| continuity-proof | Measure that the continuity brief is emitted and used, not just built to be emitted | in-progress | A1 measurement is landed (#378): `continuity_log`, config counters, and the golden continuity-use fixture measure emission/use. A2 is also landed (#423): stdio and SSE publish the shared `get_continuity_brief` start directive through MCP server instructions, with black-box protocol coverage. Remaining code/documentation work is A0: reconcile the client × transport inventory so stderr / native hook / MCP tool defaults cannot drift between docs and installer registries. | #378, #423 |
+| continuity-proof | Measure that the continuity brief is emitted and used, not just built to be emitted | done | — | #378, #423, #486 |
 | memory-federation | Peer memory exchange with provenance, signature and receiver-side decay | proposed | B0 is complete: the signed offline federation envelope verifies peer provenance, stamps the verified origin into admitted/held candidates, and proves admit/reject/review outcomes through `import_memories_gated` (#356, #357, #425 / #338). Remaining B1 is a pull-first exchange transport, which stays blocked on the tenancy decision because identity determines which peer may pull from which workspace. | #338, #356, #357, #425, #302 |
 | typescript-sdk | TypeScript SDK over the REST and MCP surface | done | — | #307 |
 | git-enrichment | Make the git and GitHub connectors actually feed memory | done | — | #374, #399 |
@@ -49,8 +49,7 @@ numbered findings, and because each one is also a candidate revenue surface.
 ## Why these are deferred rather than started
 
 The remaining architecture-heavy deferred/proposed items are gated on one of two design
-decisions that are open on purpose. The second-locale i18n step and continuity proof do
-not need either gate:
+decisions that are open on purpose:
 
 - **Tenancy.** `LEVH_TOKEN` gates the whole server as a single principal — it
   identifies no user, workspace, or role. Team features and a hosted tier both
@@ -60,9 +59,6 @@ not need either gate:
   surfaces (support/SLA, hosted sync, team workspace, SSO + metering) are ordered
   by how little they disturb the local-first core. See #298.
 
-The frontend extraction rollout and Slack connector are already done. The remaining
-second-locale i18n step and continuity-proof reconciliation do **not** need either
-decision first, so they remain the cheapest open workstreams to resume. Jira and
-Linear landed on the same reasoning: they cost no new architecture, and the sync
-framework they plug into already existed. The TypeScript SDK is already done
-because the contract it generates from was frozen.
+The frontend i18n rollout, continuity proof, Slack connector, Jira, Linear, and
+TypeScript SDK are already done. The remaining open workstreams above are the
+architecture-heavy items gated by tenancy or revenue decisions.

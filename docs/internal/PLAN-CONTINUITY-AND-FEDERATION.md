@@ -27,40 +27,30 @@ the before/after numbers B needs to show federation did not damage recall.
 
 ## Phase A — prove continuity end to end
 
-### A0. Reconcile the brief's transport inventory
+### A0. Reconcile the brief's transport inventory — complete (#486)
 
-The multi-channel story is real (stderr bridge, native session-start hooks,
-tool/resource) but it is stated unevenly across the tree: `universal_hooks.py`
-and `docs/mcp-client-config.md` document the opt-in/default flags, while the
-README's per-client list is prose. Nothing checks the three channels against
-the code, so a client added to one list and not another drifts silently.
+The client × channel matrix now lives in `docs/mcp-client-config.md` and is
+rendered from `server/continuity_inventory.py`. Its test reads the same MCP
+platform registry, native-hook support, minimal tool tier and shared MCP start
+instruction used at runtime. It distinguishes LEVH emitting stderr from a
+client consuming it, and records that only Claude Code currently has an
+installer-owned native SessionStart hook. README prose now points to that
+matrix instead of maintaining a second capability list.
 
-Next step: a single table — client × channel (stderr / hook / tool) × default —
-kept honest by a test that reads the same registries the installers read.
+### A1. Measure whether continuity is emitted and used — landed (#378)
 
-### A1. Measure whether continuity is emitted and used
+Both offline signals are implemented. Emission is recorded as a producer-side
+event, deliberately named `briefs_emitted` rather than delivery: stderr output
+or a successful hook invocation cannot prove the client read it. Store-scale
+use pairs recently surfaced memory ids with later recall-log hits inside the
+24-hour use window.
 
-This is the highest-value gap: feature count is not evidence. Two signals, both
-offline and already partially present:
-
-- **Emission — a proxy for delivery, not delivery itself.** `LEVH_AUTO_BRIEF`
-  prints the brief to stderr and a hook runs `levh continue --limit 5 --if-any`;
-  both are producer-side events we can count (the stderr line was written, the
-  hook call succeeded and produced output). Neither proves the agent read it:
-  that is the client's behavior, outside our process. Name the counter
-  accordingly (`briefs emitted`, not `briefs delivered`) so the number cannot be
-  read as a delivery guarantee.
-- **Use.** The engine already records recall events and reinforces recalled
-  memories. A continuity-specific counter (briefs whose suggested memories were
-  then recalled, `recall_memory` calls in the first N turns of a session) is the
-  only signal that speaks to use rather than emission, and turns "the agent
-  starts briefed" from a claim into a number.
-
-Next step: extend the golden-fixture evaluator
-(`server/core/evaluation.py`, `tests/fixtures/evaluation/*.json`) with a
-continuity scenario: store a checkpoint + a pinned rule + a blocker, then assert
-the brief surfaces them in that order and that a subsequent recall reinforces
-the surfaced memory. Determinism and privacy contracts already apply.
+The golden continuity fixture is also landed:
+`tests/fixtures/evaluation/11_continuity_brief_surface_and_use.json` seeds a
+checkpoint, pinned rule and blocker; the evaluator asserts their surfaced order,
+then recalls a surfaced memory with reinforcement enabled and verifies that the
+memory was both returned and reinforced. This measures the engine-level
+surface/use path without claiming which external client obeyed an instruction.
 
 ### A2. Close the weak link honestly — landed
 

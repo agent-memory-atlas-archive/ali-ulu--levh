@@ -55,21 +55,18 @@ Two things make this workable instead of noisy at that scale:
   discarding risks losing the one detail that mattered. It used to be
   dropped silently. Now it is held — visible, admittable, discardable — so no
   agent's write is ever the one that vanishes.
-- **Sessions start already briefed, not told to go look — where the client
-  supports it.** `levh hook install --client claude-code` (and the same for
-  Claude Desktop, Cursor, Windsurf, VS Code/Cline) wires a native
-  session-start hook that pushes pinned rules, recent sessions and open
-  blockers in front of the agent before the first prompt. Codex and Hermes
-  get the same brief through their own hook systems (`hooks.SessionStart` in
-  `config.toml`, a `pre_llm_call` shell hook in `~/.hermes/config.yaml`) —
-  same `levh continue --limit 5 --if-any` call, different wiring per client.
-  Clients without a documented hook surface (opencode, kilocode, jcode, pi,
-  the standalone Cline CLI) still get full MCP tool access and an AGENTS.md
-  rule to call `recall_memory` first — active, not passive, until one of
-  them ships a hookable session-start event. A memory tool an agent has to
-  be reminded to consult is a filing cabinet with extra steps; not being
-  able to remind it automatically yet is a narrower problem than not having
-  the memory at all.
+- **Sessions start with multiple continuity paths, and the defaults are
+  explicit.** Every generated MCP client config starts LEVH's stdio server,
+  which advertises `get_continuity_brief` in the minimal tool surface and a
+  server instruction to call it at work-session start. The stdio server also
+  emits the brief on stderr by default, although whether a client displays or
+  consumes stderr is outside LEVH's control. Claude Code additionally has an
+  opt-in native `SessionStart` hook installed by
+  `levh hook install --client claude-code`; the other generated clients do
+  not currently have an installer-owned native session-start hook. The
+  code-backed client/channel matrix is in
+  [Platform Setup](docs/mcp-client-config.md#continuity-delivery-inventory), so
+  this claim cannot drift from the installer registries.
 
 This isn't the first shared-MCP-memory idea — mem0's OpenMemory does the same
 loopback-server pattern for a smaller client set. What's specific to LEVH is

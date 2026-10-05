@@ -49,8 +49,7 @@ numbered findings, and because each one is also a candidate revenue surface.
 ## Why these are deferred rather than started
 
 The remaining architecture-heavy deferred/proposed items are gated on one of two design
-decisions that are open on purpose. The second-locale i18n step and continuity proof do
-not need either gate:
+decisions that are open on purpose:
 
 - **Tenancy.** `LEVH_TOKEN` gates the whole server as a single principal — it
   identifies no user, workspace, or role. Team features and a hosted tier both
@@ -60,9 +59,6 @@ not need either gate:
   surfaces (support/SLA, hosted sync, team workspace, SSO + metering) are ordered
   by how little they disturb the local-first core. See #298.
 
-The frontend extraction rollout and Slack connector are already done. The remaining
-second-locale i18n step and continuity-proof reconciliation do **not** need either
-decision first, so they remain the cheapest open workstreams to resume. Jira and
-Linear landed on the same reasoning: they cost no new architecture, and the sync
-framework they plug into already existed. The TypeScript SDK is already done
-because the contract it generates from was frozen.
+The frontend i18n rollout, continuity proof, Slack connector, Jira, Linear, and
+TypeScript SDK are already done. The remaining open workstreams above are the
+architecture-heavy items gated by tenancy or revenue decisions.

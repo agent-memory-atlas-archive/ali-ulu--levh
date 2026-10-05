@@ -4,7 +4,11 @@ from pathlib import Path
 
 from server.commands.universal_hooks import SUPPORTED_AGENTS
 from server.configs import PLATFORMS, generate_config
-from server.continuity_inventory import continuity_inventory, render_continuity_inventory
+from server.continuity_inventory import (
+    _HOOK_PLATFORM_KEYS,
+    continuity_inventory,
+    render_continuity_inventory,
+)
 from server.core.continuity_instructions import MCP_CONTINUITY_INSTRUCTIONS
 from server.tools.profiles import TOOL_TIERS
 
@@ -33,6 +37,11 @@ def test_inventory_covers_every_public_config_target():
 
 def test_native_hook_column_is_derived_from_real_session_start_support():
     by_platform = {row.platform: row for row in continuity_inventory()}
+
+    assert set(_HOOK_PLATFORM_KEYS) == set(PLATFORMS)
+    assert {key for key in _HOOK_PLATFORM_KEYS.values() if key is not None} == set(
+        SUPPORTED_AGENTS
+    )
 
     assert SUPPORTED_AGENTS["claude-code"].supports_session_start is True
     assert by_platform["claude_code"].native_hook == "opt-in SessionStart"

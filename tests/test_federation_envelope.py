@@ -365,7 +365,8 @@ class TestFederationCli:
         from server.core import engine_provider
         from server.commands import data as data_cmd
 
-        engine_provider.set_engine(self._engine(tmp_path, "dst.db"))
+        engine = self._engine(tmp_path, "dst.db")
+        engine_provider.set_engine(engine)
         try:
             return data_cmd.cmd_federation_import(
                 argparse.Namespace(
@@ -373,6 +374,9 @@ class TestFederationCli:
                 )
             )
         finally:
+            # Rejected envelopes return before the CLI acquires the engine.
+            # The test still owns the connection it opened above.
+            asyncio.run(engine.shutdown())
             engine_provider.set_engine(None)
 
     def _seed_src(self, tmp_path, content, metadata=None):
@@ -455,7 +459,8 @@ class TestFederationCli:
 
         key = tmp_path / "shared.key"
         key.write_text("operator-shared-secret", encoding="utf-8")
-        engine_provider.set_engine(self._engine(tmp_path, "dst.db"))
+        engine = self._engine(tmp_path, "dst.db")
+        engine_provider.set_engine(engine)
         try:
             rc = data_cmd.cmd_federation_import(
                 argparse.Namespace(
@@ -463,6 +468,7 @@ class TestFederationCli:
                 )
             )
         finally:
+            asyncio.run(engine.shutdown())
             engine_provider.set_engine(None)
         assert rc == 1
 

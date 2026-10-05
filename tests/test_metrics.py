@@ -112,10 +112,12 @@ def test_rebuild_failure_increments_the_counter(monkeypatch):
 
     async def _run() -> None:
         await engine.initialize()
-        # Inline (retry=False) so the failing pass fails fast instead of
-        # sleeping through the background backoff schedule.
-        await engine._rebuild_derived(retry=False)
-        await engine.shutdown()
+        try:
+            # Inline (retry=False) so the failing pass fails fast instead of
+            # sleeping through the background backoff schedule.
+            await engine._rebuild_derived(retry=False)
+        finally:
+            await engine.shutdown()
 
     with pytest.raises(RuntimeError):
         asyncio.run(_run())

@@ -24,7 +24,7 @@ export function LocaleSwitcher() {
       onClick={() => setLocale(nextLocale)}
       aria-label={t("locale.switcher.switchTo", { language: nextLanguage })}
       title={t("locale.switcher.title", { language: nextLanguage })}
-      className="icon-button hidden min-w-12 items-center justify-center gap-1.5 px-2 sm:flex"
+      className="icon-button flex min-w-12 items-center justify-center gap-1.5 px-2"
     >
       <Languages className="h-4 w-4" />
       <span className="text-[10px] font-semibold">{currentLabel}</span>

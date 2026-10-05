@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Settings,
   ShieldAlert,
+  Sparkles,
   Sunrise,
   Bot,
   Users,
@@ -30,6 +31,7 @@ const groups = [
     labelKey: "sidebar.group.memory",
     items: [
       { href: "/", labelKey: "sidebar.nav.overview", icon: BrainCircuit },
+      { href: "/assistant", labelKey: "sidebar.nav.assistant", icon: Sparkles },
       { href: "/memories", labelKey: "sidebar.nav.memories", icon: Database },
       { href: "/graph", labelKey: "sidebar.nav.graph", icon: Network },
       { href: "/timeline", labelKey: "sidebar.nav.timeline", icon: Clock3 },

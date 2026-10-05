@@ -12,6 +12,14 @@ const STORAGE_KEY = "levh_token";
 const LEGACY_STORAGE_KEY = "stackmemory_token";
 const CHANGE_EVENT = "levh-token-changed";
 
+/**
+ * The header the server gate reads. Exported because more than one caller
+ * now has to send it: the JSON client in `./api` and the Opengeni chat page,
+ * which streams through `/api/opengeni`. Two spellings of one header name is
+ * a bug that only shows up on a token-protected install.
+ */
+export const TOKEN_HEADER = "X-LEVH-Token";
+
 /** Returns the stored token, or "" when none is set / not in a browser. */
 export function getToken(): string {
   if (typeof window === "undefined") return "";

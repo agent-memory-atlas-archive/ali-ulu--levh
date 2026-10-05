@@ -403,7 +403,7 @@ def test_actor_header_encodes_the_same_way_the_sdk_does():
     # as path, which is what keeps the header one value.
     assert encoded.startswith("%7B%22mode%22%3A%22external%22")
     assert "/" not in encoded
-    assert opengeni.actor_header("local") == opengeni.actor_header("local", source="levh")
+    assert opengeni.actor_header("local") == opengeni.actor_header("local", source=opengeni.identity_source())
 
 
 

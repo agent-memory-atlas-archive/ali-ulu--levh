@@ -57,12 +57,12 @@ Two things make this workable instead of noisy at that scale:
   agent's write is ever the one that vanishes.
 - **Sessions start with multiple continuity paths, and the defaults are
   explicit.** Every generated MCP client config starts LEVH's stdio server,
-  which advertises \`get_continuity_brief\` in the minimal tool surface and a
+  which advertises `get_continuity_brief` in the minimal tool surface and a
   server instruction to call it at work-session start. The stdio server also
   emits the brief on stderr by default, although whether a client displays or
   consumes stderr is outside LEVH's control. Claude Code additionally has an
-  opt-in native \`SessionStart\` hook installed by
-  \`levh hook install --client claude-code\`; the other generated clients do
+  opt-in native `SessionStart` hook installed by
+  `levh hook install --client claude-code`; the other generated clients do
   not currently have an installer-owned native session-start hook. The
   code-backed client/channel matrix is in
   [Platform Setup](docs/mcp-client-config.md#continuity-delivery-inventory), so

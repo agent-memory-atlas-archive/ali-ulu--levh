@@ -27,16 +27,15 @@ the before/after numbers B needs to show federation did not damage recall.
 
 ## Phase A — prove continuity end to end
 
-### A0. Reconcile the brief's transport inventory
+### A0. Reconcile the brief's transport inventory — complete (#486)
 
-The multi-channel story is real (stderr bridge, native session-start hooks,
-tool/resource) but it is stated unevenly across the tree: `universal_hooks.py`
-and `docs/mcp-client-config.md` document the opt-in/default flags, while the
-README's per-client list is prose. Nothing checks the three channels against
-the code, so a client added to one list and not another drifts silently.
-
-Next step: a single table — client × channel (stderr / hook / tool) × default —
-kept honest by a test that reads the same registries the installers read.
+The client × channel matrix now lives in \`docs/mcp-client-config.md\` and is
+rendered from \`server/continuity_inventory.py\`. Its test reads the same MCP
+platform registry, native-hook support, minimal tool tier and shared MCP start
+instruction used at runtime. It distinguishes LEVH emitting stderr from a
+client consuming it, and records that only Claude Code currently has an
+installer-owned native SessionStart hook. README prose now points to that
+matrix instead of maintaining a second capability list.
 
 ### A1. Measure whether continuity is emitted and used
 

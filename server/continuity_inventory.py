@@ -24,13 +24,18 @@ class ContinuityChannelRow:
     mcp_tool: str
 
 
-_HOOK_PLATFORM_KEYS = {
-    "claude_code": "claude-code",
+_HOOK_PLATFORM_KEYS: dict[str, str | None] = {
     "claude_desktop": "claude-desktop",
     "cursor": "cursor",
+    "claude_code": "claude-code",
     "vscode": "vscode",
-    "cline": "vscode",
     "windsurf": "windsurf",
+    "cline": "vscode",
+    "jcode": None,
+    "omp": None,
+    "opencode": None,
+    "codex": None,
+    "hermes": None,
 }
 
 

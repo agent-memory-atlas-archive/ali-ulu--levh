@@ -27,11 +27,12 @@ with the parser the platform actually uses.
 
 ## Continuity delivery inventory
 
-This table is code-backed by \`server/continuity_inventory.py\`. “Server emits”
+This table is code-backed by `server/continuity_inventory.py`. “Server emits”
 describes LEVH's stdio behavior, not proof that a particular client displays or
 consumes stderr. Likewise, the MCP start directive is advertised by the server;
-whether a client follows it is client behavior and is measured separately by
-the continuity-use metrics.
+whether a client follows it is client behavior. The store-scale continuity-use
+metrics track whether recently surfaced memories are returned by recall within
+24 hours; they do not identify which client followed the directive.
 
 <!-- continuity-inventory:start -->
 | Client | Stderr bridge | Native session-start hook | MCP continuity tool/directive |
@@ -52,7 +53,7 @@ the continuity-use metrics.
 
 The native hook column means an installer-owned session-start event, not a
 rules file or reminder. Today only Claude Code has that hook. Cursor's installer
-also writes \`.cursorrules\`, and the shell helper is opt-in, but neither is a
+also writes `.cursorrules`, and the shell helper is opt-in, but neither is a
 native session-start channel.
 
 ## Claude Desktop

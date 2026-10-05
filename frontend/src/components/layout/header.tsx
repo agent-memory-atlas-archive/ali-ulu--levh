@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { ThemeSwitcher } from "@/components/layout/theme-switcher";
+import { LocaleSwitcher } from "@/components/layout/locale-switcher";
 import { CommandPalette } from "@/components/command-palette";
 import { useT } from "@/lib/i18n";
 import {
@@ -105,6 +106,7 @@ export function Header() {
             {online ? t("header.status.online") : t("header.status.offline")}
           </div>
         )}
+        <LocaleSwitcher />
         <ThemeSwitcher />
         <button className="icon-button hidden sm:grid" aria-label={t("header.action.help")} onClick={() => setHelpOpen(true)}><CircleHelp className="h-4 w-4" /></button>
         <button className="icon-button relative hidden sm:grid" aria-label={t("header.action.notifications")} onClick={() => setNotifOpen(true)}>

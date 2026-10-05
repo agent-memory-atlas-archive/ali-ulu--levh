@@ -5,7 +5,8 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthGate } from "@/components/auth-gate";
-import { translate } from "@/lib/i18n/translate";
+import { DEFAULT_LOCALE, translate } from "@/lib/i18n/translate";
+import { LocaleProvider } from "@/lib/i18n";
 
 export const metadata: Metadata = {
   title: translate("app.metadata.title"),
@@ -27,21 +28,23 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={DEFAULT_LOCALE} suppressHydrationWarning>
       <body className="antialiased">
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange={false}>
-          <div className="app-canvas min-h-screen">
-            <div className="ambient ambient-one" />
-            <div className="ambient ambient-two" />
-            <Sidebar />
-            <div className="min-w-0 lg:ml-[248px]">
-              <Header />
-              <main className="relative z-10 mx-auto max-w-[1680px] p-4 sm:p-6 lg:p-8">
-                <AuthGate>{children}</AuthGate>
-              </main>
+        <LocaleProvider>
+          <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange={false}>
+            <div className="app-canvas min-h-screen">
+              <div className="ambient ambient-one" />
+              <div className="ambient ambient-two" />
+              <Sidebar />
+              <div className="min-w-0 lg:ml-[248px]">
+                <Header />
+                <main className="relative z-10 mx-auto max-w-[1680px] p-4 sm:p-6 lg:p-8">
+                  <AuthGate>{children}</AuthGate>
+                </main>
+              </div>
             </div>
-          </div>
-        </ThemeProvider>
+          </ThemeProvider>
+        </LocaleProvider>
         <Script id="levh-pwa-register" strategy="afterInteractive" src="/pwa-register.js" />
       </body>
     </html>

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### i18n: move Memory Detail Drawer copy into the catalogue (#475)
+
+- Drawer actions/accessibility, trust, retention, metadata, score-breakdown, chart-tooltip, formula, and related-memory copy now resolve through `useT()`.
+- Dynamic memory/trust/score/relationship values remain runtime data; the UI-string ratchet for `src/components/memory-detail-drawer.tsx` drops from 75 to 11, leaving only technical locale/date-format, keyboard-navigation, and chart/style detector residuals.
+
+
 ### i18n: move onboarding empty-state copy into the catalogue (#473)
 
 - Onboarding setup, demo, real-memory, MCP, dogfood, readiness, terminal, status, confirmation, label, and accessibility copy now resolves through `useT()`.

@@ -741,3 +741,29 @@ def test_default_identity_source_uses_host_and_database(monkeypatch):
 
     monkeypatch.setattr(opengeni.socket, "gethostname", lambda: "host-b")
     assert opengeni.identity_source() != source_a
+
+
+@pytest.mark.asyncio
+async def test_memory_context_truncates_an_oversized_top_memory():
+    class Result:
+        def __init__(self, memories):
+            self.memories = memories
+
+    class Memory:
+        def __init__(self, content):
+            self.content = content
+            self.created_at = ""
+            self.tags = []
+
+    class Engine:
+        async def recall(self, text, *, top_k, reinforce):
+            assert text == "oversized"
+            assert top_k == 6
+            assert reinforce is False
+            return Result([Memory("x" * (opengeni.CONTEXT_MAX_CHARS * 2))])
+
+    context = await opengeni.memory_context(Engine(), "oversized")
+    assert context is not None
+    memory_block = context.rsplit("\n\n", 1)[-1]
+    assert len(memory_block) <= opengeni.CONTEXT_MAX_CHARS
+    assert memory_block.endswith("…")

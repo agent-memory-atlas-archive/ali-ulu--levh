@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### continuity: lock client delivery channels to runtime registries (#486)
+
+- Added a code-backed client × channel matrix for stderr emission, native session-start hooks, and the MCP continuity tool/start directive.
+- Added a drift test that derives the matrix from the MCP platform registry, native hook registry, minimal tool tier, and shared MCP instruction.
+- Corrected README claims so only Claude Code is described as having an installer-owned native SessionStart hook; stderr emission is no longer presented as proof of client consumption.
+
+
 ### i18n: ship Turkish UI locale and switcher (#481)
 
 - Added a complete Turkish catalogue in `frontend/src/lib/i18n/tr.json`, kept `en` as the default/fallback locale, and added parity coverage so both catalogues carry the same keys and interpolation variables.

@@ -319,10 +319,10 @@ async def memory_context(engine: Any, question: str, *, limit: int = 6) -> str |
             label += f" ({tags})"
         body = " ".join(str(getattr(memory, "content", "") or "").split())
         block = f"{label}\n{body}\n"
-        # Always keep the first (best-ranked) memory, however long it is; stop
-        # before the cap only once at least one memory made it in.
-        if used + len(block) > CONTEXT_MAX_CHARS and index > 1:
-            break
+        if used + len(block) > CONTEXT_MAX_CHARS:
+            if index > 1:
+                break
+            block = block[: CONTEXT_MAX_CHARS - 1] + "…"
         lines.append(block)
         used += len(block)
     return "\n".join(lines).strip() or None

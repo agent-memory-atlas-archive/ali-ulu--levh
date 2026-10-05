@@ -796,5 +796,14 @@
   "locale.switcher.enShort": "EN",
   "locale.switcher.trShort": "TR",
   "locale.switcher.switchTo": "Switch to {language}",
-  "locale.switcher.title": "Language: {language}"
+  "locale.switcher.title": "Language: {language}",
+  "sidebar.nav.assistant": "Assistant",
+  "assistant.title": "Memory assistant",
+  "assistant.subtitle": "A chat that answers from this LEVH store. Each message is searched first, and the answer cites the memories it used. The assistant reads only — it cannot change what you have stored.",
+  "assistant.chat.newChatTitle": "What should I look up?",
+  "assistant.chat.newChatPlaceholder": "Ask about your memories…",
+  "assistant.chat.send": "Send",
+  "assistant.chat.openChats": "Chats",
+  "assistant.chat.closeChats": "Close chats",
+  "assistant.chat.newChatUnavailable": "New chats need LEVH_OPENGENI_API_KEY on the LEVH server."
 }

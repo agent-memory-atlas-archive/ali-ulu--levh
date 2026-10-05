@@ -30,7 +30,7 @@ import type {
   TimelineDay,
   TrustBreakdown,
 } from "@/types";
-import { getToken } from "./token";
+import { getToken, TOKEN_HEADER } from "./token";
 
 // Same-origin by default (dashboard is served by the FastAPI server).
 // Set NEXT_PUBLIC_API_URL only when running `next dev` against a separate API.
@@ -70,7 +70,7 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
       "Content-Type": "application/json",
       // Token gate: attach when set on the server (see /lib/token). A
       // user-supplied header for the same key still wins via spread order.
-      ...(token ? { "X-LEVH-Token": token } : {}),
+      ...(token ? { [TOKEN_HEADER]: token } : {}),
       ...options?.headers,
     },
     ...options,

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### feat: add the memory assistant chat
+
+- Added `/assistant`, an embedded Opengeni chat that answers from the local store: the proxy recalls memories for each message, attaches them as model context, and the agent cites what it used.
+- Implemented Opengeni's session-proxy contract for the FastAPI backend so the organization key stays server-side and the browser only talks to `/api/opengeni/*`.
+- Chats are private to the install, the agent has no workspace tools, and recall is read-only with `reinforce=False`.
+- Forwarded only the conversation surface and kept uploads, artifacts, voice, model selection, forensic reads, and cancel disabled.
+- The assistant stays off until `LEVH_OPENGENI_API_KEY` is configured; its UI copy now ships in both English and Turkish.
+
+
 ### continuity: lock client delivery channels to runtime registries (#486)
 
 - Added a code-backed client × channel matrix for stderr emission, native session-start hooks, and the MCP continuity tool/start directive.

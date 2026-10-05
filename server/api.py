@@ -222,6 +222,13 @@ from server.routes.librarian import router as librarian_router
 
 app.include_router(librarian_router)
 
+# ── Opengeni asistan sohbeti ───────────────────────────────────────
+# The embedded memory-assistant proxy: the browser's chat UI talks only to
+# /api/opengeni/* here, and this process holds the organization key.
+from server.routes.opengeni import router as opengeni_router
+
+app.include_router(opengeni_router)
+
 
 # ── Sürümlemeli API yüzeyi (/api/v1) ───────────────────────────────
 # Ayrıntı ve gerekçe: server/api_versioning.py. Eski (/api/*) yollar geriye

@@ -161,6 +161,7 @@ levh mcp init my-server --with-memory   # scaffold an MCP server on this databas
 | | |
 |---|---|
 | [Getting Started](docs/getting-started.md) | First run, demo vs. real data |
+| [Memory Assistant](docs/opengeni-assistant.md) | Optional chat that answers from your store |
 | [Platform Setup](docs/mcp-client-config.md) | Claude Desktop, Claude Code, Cursor, Windsurf, VS Code (Cline), jcode, omp, opencode, Codex, Hermes |
 | [Configuration](docs/configuration.md) | Environment variables, precedence, Docker |
 | [Architecture](docs/ARCHITECTURE.md) | Layers, engine, scoring internals |

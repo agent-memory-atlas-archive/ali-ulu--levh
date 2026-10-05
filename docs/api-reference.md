@@ -160,6 +160,11 @@ because it is a read that has to POST to carry its query.
 | POST | `/api/v1/team/decision-conflicts/detect` | Scan differently-keyed shared decisions for opposition + shared-topic conflict candidates |
 | GET | `/api/v1/team/decision-conflicts` | List semantic shared-decision conflict candidates by project/status |
 | POST | `/api/v1/team/decision-conflicts/{conflict_id}/review` | Admin review of a semantic decision conflict candidate: confirm, dismiss, or resolve |
+| GET | `/api/v1/opengeni/{path}` | Opengeni session proxy: forward an allowlisted read (client config, workspace, model catalog, sessions, events, queue, composer draft, human input) as this install |
+| POST | `/api/v1/opengeni/{path}` | Opengeni session proxy: create a chat, send a message or approval, steer, control, or answer a question. The server decides model, agent, and privacy; requires `LEVH_OPENGENI_API_KEY` |
+| PUT | `/api/v1/opengeni/{path}` | Opengeni session proxy: archive a chat, or save a composer draft |
+| PATCH | `/api/v1/opengeni/{path}` | Opengeni session proxy: rename a chat (only `{ "title" }`) |
+| DELETE | `/api/v1/opengeni/{path}` | Opengeni session proxy: forwarded for the routes the contract allows (nothing else is served) |
 | WS | `/ws/agents` | WebSocket for real-time agent presence updates |
 | WS | `/ws/memory` | Real-time event stream + RPC actions (recall/stats/ping; writes blocked in public demo mode) |
 | SSE | `/api/mcp/sse` | MCP SSE stream endpoint |

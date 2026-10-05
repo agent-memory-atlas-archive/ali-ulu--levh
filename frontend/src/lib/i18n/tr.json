@@ -796,5 +796,14 @@
   "memoryDetail.score.formula": "H(x,ψ) = α(1−benzerlik) + β(1−azalma) + γ(1−önem) + δ(1−sıklık)",
   "app.metadata.title": "LEVH",
   "app.metadata.description": "LEVH — yapay zekâ çalışmaları için önce yerel bağlam sürekliliği.",
-  "app.metadata.applicationName": "LEVH"
+  "app.metadata.applicationName": "LEVH",
+  "sidebar.nav.assistant": "Asistan",
+  "assistant.title": "Bellek asistanı",
+  "assistant.subtitle": "Bu LEVH deposundaki bilgilerden yanıt veren bir sohbet. Her mesaj önce bellekte aranır ve yanıt kullandığı belleklere atıf yapar. Asistan yalnızca okur, kaydettiğiniz hiçbir şeyi değiştiremez.",
+  "assistant.chat.newChatTitle": "Neyi arayayım?",
+  "assistant.chat.newChatPlaceholder": "Bellekleriniz hakkında sorun…",
+  "assistant.chat.send": "Gönder",
+  "assistant.chat.openChats": "Sohbetler",
+  "assistant.chat.closeChats": "Sohbetleri kapat",
+  "assistant.chat.newChatUnavailable": "Yeni sohbetler için LEVH sunucusunda LEVH_OPENGENI_API_KEY ayarlanmalıdır."
 }

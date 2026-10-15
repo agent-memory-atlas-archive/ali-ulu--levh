@@ -516,3 +516,22 @@ async def test_conflicts_mcp_tools_flow(engine):
     )
     text = _tool_text(result)
     assert "dismissed" in text.lower() or "dismiss" in text.lower()
+
+
+def test_word_tokenization_is_cached_and_read_only():
+    """The pair scan tokenizes both sides of every entity-overlap pair, so the
+    same two contents go through `_words` thousands of times per rebuild: ~12k
+    pairs on the reference store, which made the uncached version ~1.5s of the
+    first freshness read after a write. The cached set must stay read-only —
+    the callers only test membership and build their own results."""
+    conflict._words.cache_clear()
+    hits = conflict._words.cache_info().hits
+
+    first = conflict._words("Release pipeline will drop the legacy flag")
+    assert conflict._words("Release pipeline will drop the legacy flag") is first
+    assert conflict._words.cache_info().hits == hits + 1
+
+    snapshot = set(first)
+    conflict.topic_terms("Release pipeline will drop the legacy flag")
+    conflict._antonym_signal("drop the flag", "keep the flag")
+    assert conflict._words("Release pipeline will drop the legacy flag") == snapshot

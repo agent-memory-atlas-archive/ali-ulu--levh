@@ -66,6 +66,32 @@ async def get_engine() -> MemoryEngine:
     return await _publish_engine()
 
 
+async def _warm_derived_state(engine: MemoryEngine) -> None:
+    """Build the derived views once at startup, off the request path.
+
+    Entity graph, conflict candidates and trust scores are marked dirty when
+    the engine initializes, and the first freshness-required read then pays
+    the full-corpus rebuild inline — minutes on a large store, during which
+    every other request stalls behind it and the dashboard looks frozen.
+    Running that rebuild here, in the background, means the views are usually
+    already built by the time a human opens the dashboard. The people/orgs
+    aggregates are warmed too: they are cached per data_version, and the
+    first page load would otherwise pay the whole-corpus text scan.
+
+    Failures are logged, never raised: a read still rebuilds inline when this
+    warmup did not get there first.
+    """
+    try:
+        await engine.recompute_derived_state()
+        await engine.list_people(limit=1)
+        await engine.list_organizations(limit=1)
+        logger.info("derived-state warmup complete")
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("derived-state warmup failed; reads rebuild inline")
+
+
 # ── App lifespan ─────────────────────────────────────────────────────
 
 
@@ -84,8 +110,15 @@ async def lifespan(_app: FastAPI):
     engine: MemoryEngine | None = None
     librarian_task = None
     auto_sync_task = None
+    warm_task = None
     try:
         engine = await get_engine()
+        # Off the request path: see _warm_derived_state for why the first
+        # freshness-required read must not be the one paying this cost.
+        if engine is not None and not deps.public_demo():
+            warm_task = asyncio.get_running_loop().create_task(
+                _warm_derived_state(engine)
+            )
         # Librarian bekçi ajanı — sunucu açılınca başlar, kapanırken durur.
         # Public demo'da çalışmaz: orada her yazma zaten reddedilir ve bekçinin
         # kendi bulguları demo korpusunu kirletir.
@@ -101,6 +134,12 @@ async def lifespan(_app: FastAPI):
             auto_sync_task = auto_sync.start_background(engine)
         yield
     finally:
+        if warm_task:
+            warm_task.cancel()
+            # Await it like the librarian: an un-awaited cancel races the
+            # engine's own shutdown below.
+            with contextlib.suppress(asyncio.CancelledError):
+                await warm_task
         if auto_sync_task:
             auto_sync_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

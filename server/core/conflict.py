@@ -19,6 +19,7 @@ the entity-overlap and trust context.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 # Bidirectional antonym / opposite pairs (lowercase). Small and curated —
 # broad NLP is deliberately avoided.
@@ -63,13 +64,29 @@ _LABELLED_RE = re.compile(
 _STOP_KEYS = {"it", "this", "that", "there", "here", "what", "who", "which"}
 
 
+@lru_cache(maxsize=4096)
 def _words(text: str) -> set[str]:
+    """Lowercased word tokens of a text.
+
+    Cached, and read-only at every call site (membership tests and set
+    comprehensions that build their own result). The pair scan calls this for
+    both sides of every entity-overlap pair, so an uncached version re-ran the
+    regex over the same two contents ~12k times per rebuild: 3s of the 4-5s
+    the first freshness read after a write spent rebuilding derived state.
+    """
     return set(re.findall(r"[a-z]+", (text or "").lower()))
 
 
+@lru_cache(maxsize=4096)
 def extract_assertions(content: str) -> dict[str, set[str]]:
     """Return {normalized_key: {values}} of simple attribute assertions.
-    A negated value is prefixed with ``!`` so "is not X" opposes "is X"."""
+    A negated value is prefixed with ``!`` so "is not X" opposes "is X".
+
+    Cached: the pair scan passes each memory's content through here once per
+    pair, and a large store re-parses the same text thousands of times per
+    rebuild. The result is read-only at every call site (only set operations
+    and membership checks), so sharing one mapping is safe.
+    """
     out: dict[str, set[str]] = {}
 
     def _add(key: str, value: str) -> None:
@@ -105,13 +122,15 @@ def _antonym_signal(a: str, b: str) -> str | None:
 _ANTONYM_WORDS: set[str] = {word for pair in _ANTONYM_PAIRS for word in pair}
 
 
+@lru_cache(maxsize=8192)
 def topic_terms(text: str) -> set[str]:
     """Meaningful topic tokens of a free-text memory.
 
     Same idea as :func:`decision_topic_terms` for shared decisions: generic
     verbs and the antonym vocabulary itself are excluded, so two texts that
     merely share the word "keep" (or "use", "should", ...) do not anchor each
-    other.
+    other. Cached — the pair scan re-tokenizes the same content once per
+    pair; results are only intersected, never mutated.
     """
     return {
         word

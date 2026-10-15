@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sqlite3
 import sys
 import tempfile
 
@@ -264,3 +265,114 @@ async def test_fresh_write_interrupts_backoff_and_resets_counter(engine):
     elapsed = loop.time() - start
     assert engine._derived_dirty is False
     assert elapsed < 1.0, f"recovery took {elapsed:.2f}s — backoff not interrupted"
+
+
+def _count_passes(engine) -> list[int]:
+    """Wrap the last step of a rebuild so a test can count completed passes."""
+    passes = [0]
+    original = engine.recompute_trust_scores
+
+    async def counted():
+        passes[0] += 1
+        return await original()
+
+    engine.recompute_trust_scores = counted  # type: ignore[method-assign]
+    return passes
+
+
+@pytest.mark.asyncio
+async def test_freshness_read_rebuilds_once_then_returns_clean_state(engine):
+    """A clean state must not be rebuilt again.
+
+    The flag was raised unconditionally before every freshness read, so each
+    one paid a full corpus pass (entity reindex -> conflict candidates ->
+    trust). On a large store that was ~25s per graph/trust/conflict page, on
+    every request, with nothing changed in between.
+    """
+    passes = _count_passes(engine)
+
+    engine._mark_derived_dirty()
+    await engine.recompute_derived_state()
+    assert passes[0] == 1
+
+    # No write in between: the second read is already fresh.
+    await engine.recompute_derived_state()
+    await engine.recompute_derived_state()
+    assert passes[0] == 1, "a clean state was rebuilt again"
+    assert engine._derived_dirty is False
+
+
+@pytest.mark.asyncio
+async def test_freshness_read_rebuilds_when_a_peer_connection_commits(engine):
+    """The early return is gated on the store, not only on the in-process flag.
+
+    ``_derived_dirty`` cannot see a write from another process sharing the
+    file (the MCP server, a second dashboard). ``PRAGMA data_version`` moves
+    when that peer commits, so the read must rebuild rather than answer
+    stale rows while claiming freshness.
+    """
+    passes = _count_passes(engine)
+
+    engine._mark_derived_dirty()
+    await engine.recompute_derived_state()
+    assert passes[0] == 1
+    await engine.recompute_derived_state()
+    assert passes[0] == 1  # clean, same store version
+
+    # A second connection standing in for the peer process. Closed explicitly:
+    # on Windows an open handle keeps the temp store file from being unlinked.
+    peer = sqlite3.connect(engine.db.db_path)
+    try:
+        peer.execute("CREATE TABLE IF NOT EXISTS peer_write_probe (x INTEGER)")
+        peer.commit()
+    finally:
+        peer.close()
+
+    await engine.recompute_derived_state()
+    assert passes[0] == 2, "peer write went unnoticed by the freshness read"
+
+
+@pytest.mark.asyncio
+async def test_freshness_read_does_not_repeat_a_running_pass(engine):
+    """A read that overlaps a background pass waits it out instead of paying
+    for the same rebuild twice."""
+    passes = _count_passes(engine)
+    slow = engine.reindex_entities
+
+    async def slow_reindex():
+        await asyncio.sleep(0.2)  # keep the background pass in flight
+        return await slow()
+
+    engine.reindex_entities = slow_reindex  # type: ignore[method-assign]
+    engine._derived_retry_count = 1  # retry debt: _mark spawns the pass
+    engine._mark_derived_dirty()
+    assert engine._derived_task is not None
+
+    await engine.recompute_derived_state()
+    assert passes[0] == 1, "the awaited pass was followed by a second one"
+    assert engine._derived_dirty is False
+
+
+@pytest.mark.asyncio
+async def test_freshness_read_rebuilds_again_when_a_write_lands_mid_pass(engine):
+    """A write during the awaited pass re-dirties the flag: that read owes a
+    second pass, so its answer is fresh by the time it returns."""
+    passes = _count_passes(engine)
+    original = engine.reindex_entities
+    writes = [0]
+
+    async def reindex_then_write():
+        result = await original()
+        # The write lands while the pass is still running, once.
+        if writes[0] == 0:
+            writes[0] = 1
+            engine._mark_derived_dirty()
+        return result
+
+    engine.reindex_entities = reindex_then_write  # type: ignore[method-assign]
+    engine._derived_retry_count = 1
+    engine._mark_derived_dirty()
+
+    await engine.recompute_derived_state()
+    assert passes[0] == 2, "the mid-pass write was dropped"
+    assert engine._derived_dirty is False

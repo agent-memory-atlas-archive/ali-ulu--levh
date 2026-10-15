@@ -35,7 +35,9 @@ class MemoryTransferMixin:
         filters = {}
         if session_id:
             filters["session_id"] = session_id
-        memories = await self.episodic.search(**filters, limit=10000)
+        memories = await self.episodic.search(
+            **filters, limit=10000, fetch_embeddings=True
+        )
         return [m.model_dump() for m in memories]
 
     async def import_memories_gated(
@@ -200,7 +202,7 @@ class MemoryTransferMixin:
         from ..attachment_store import is_managed
         from ..backup import make_snapshot
 
-        memories = await self.episodic.search(limit=1_000_000)
+        memories = await self.episodic.search(limit=1_000_000, fetch_embeddings=True)
         mem_dicts = [m.model_dump() for m in memories]
         sessions = await self.db.get_all_sessions(limit=1_000_000)
         attachments = [dict(row) for row in await self.db.all_attachments()]

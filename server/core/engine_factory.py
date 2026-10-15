@@ -72,6 +72,15 @@ def wire_engine(engine) -> None:
     engine._init_lock = asyncio.Lock()
     engine._listeners = []
     engine._derived_dirty = False
+    # Store version the last successful derived-state rebuild observed; None
+    # until one has run, which forces the first freshness read to rebuild.
+    engine._derived_data_version = None
+    # Writes that can invalidate derived state, counted so a rebuild can tell
+    # whether a write landed while it was running.
+    engine._derived_write_count = 0
+    # True while a freshness caller is waiting on a running pass and will
+    # rebuild on top of it: that pass must not also spawn a successor.
+    engine._derived_inline_waiter = False
     engine._refreshing_derived = False
     engine._derived_task = None
     engine._derived_retry_count = 0

@@ -26,8 +26,25 @@ capitalised identifiers that look like names but are not.
 
 from __future__ import annotations
 
+import json
 import re
+from functools import lru_cache
 from typing import Any
+
+
+def metadata_cache_key(metadata: dict) -> str:
+    """Stable string key for a memory's metadata, for cache lookups.
+
+    The extraction helpers below take a memory object, which is not hashable;
+    the three fields they actually read (content, metadata, source) are, once
+    the metadata mapping is serialized in a sorted, deterministic way. Any
+    metadata a caller cannot serialize falls back to "no cache key" behaviour
+    by returning an empty string, which simply misses the cache.
+    """
+    try:
+        return json.dumps(metadata, sort_keys=True, default=str, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return ""
 
 from .people import extract_people, parse_person
 
@@ -205,26 +222,54 @@ def extract_orgs_from_text(content: str, source: str = "", metadata: dict | None
     return out
 
 
+@lru_cache(maxsize=8192)
+def _people_in_memory_cached(
+    content: str, metadata_key: str, source: str
+) -> tuple[tuple[str, str], ...]:
+    metadata = json.loads(metadata_key) if metadata_key else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    found = list(extract_people(metadata))
+    seen = {(email or name).lower() for name, email in found}
+
+    for name, email in extract_people_from_text(content, source, metadata):
+        key = (email or name).lower()
+        if key not in seen:
+            seen.add(key)
+            found.append((name, email))
+    return tuple(found)
+
+
+def people_from_parts(content: str, metadata: dict, source: str) -> list[tuple[str, str]]:
+    """``people_in_memory`` for callers that already hold the parts.
+
+    Entity extraction works from plain strings internally (so the result can
+    be cached), and this is the same entry point it uses.
+    """
+    metadata = metadata if isinstance(metadata, dict) else {}
+    return list(
+        _people_in_memory_cached(content or "", metadata_cache_key(metadata), source or "")
+    )
+
+
 def people_in_memory(memory: Any) -> list[tuple[str, str]]:
     """All ``(name, email)`` people for one memory: connector metadata first,
     then anything recoverable from the content itself.
 
     Metadata wins on identity collisions, because structural fields carry a
     role (attendee, sender) that free text does not.
+
+    Cached on (content, metadata, source): the derived-state rebuild walks the
+    whole corpus several times per pass (entity graph, conflicts, trust,
+    people/orgs views), and re-scanning the same text in each walk is what
+    made those reads take minutes. Returned as a fresh list of tuples, so a
+    caller can never mutate shared cache state.
     """
     metadata = getattr(memory, "metadata", None) or {}
     if not isinstance(metadata, dict):
         metadata = {}
-    found = list(extract_people(metadata))
-    seen = {(email or name).lower() for name, email in found}
-
-    for name, email in extract_people_from_text(
+    return people_from_parts(
         getattr(memory, "content", "") or "",
-        getattr(memory, "source", None) or "",
         metadata,
-    ):
-        key = (email or name).lower()
-        if key not in seen:
-            seen.add(key)
-            found.append((name, email))
-    return found
+        getattr(memory, "source", None) or "",
+    )

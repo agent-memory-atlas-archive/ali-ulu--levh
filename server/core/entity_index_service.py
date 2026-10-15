@@ -7,6 +7,7 @@ on MemoryEngine.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -39,31 +40,46 @@ class EntityIndexService:
         as joins instead of full memory scans. Idempotent: clears and rebuilds.
         """
         now = datetime.now(timezone.utc).isoformat()
-        memories = await self.episodic.search(limit=1_000_000)
+        # Content and metadata only: the corpus-wide scan must not drag every
+        # embedding blob through JSON decoding (see search_memories).
+        memories = await self.episodic.search(limit=1_000_000, fetch_embeddings=False)
 
+        # Extracting entities from every memory is pure CPU (text scanning
+        # over the whole corpus). On the event loop it starved every concurrent
+        # request for tens of seconds while the first graph read rebuilt the
+        # index, so all the NER work is planned in a worker thread first; only
+        # the DB writes below stay on the loop.
+        def _extract_entities() -> list[tuple[str, list[dict]]]:
+            return [(memory.id, extract_entities(memory)) for memory in memories]
+
+        per_memory = await asyncio.to_thread(_extract_entities)
+
+        # The same rebuild issued one DB round-trip per row before, which made
+        # the first graph read after startup crawl even with the NER off the
+        # loop. Two executemany batches instead keep the write volume constant
+        # and the read fast.
         await self.db.clear_entity_graph()
-        entity_ids: set[str] = set()
-        links = 0
-        for memory in memories:
-            for entity in extract_entities(memory):
+        entity_rows: list[tuple[str, str, str, str, str, str]] = []
+        link_rows: list[tuple[str, str, str | None]] = []
+        seen_entities: set[str] = set()
+        for memory_id, found in per_memory:
+            for entity in found:
                 entity_id = f"{entity['type']}:{entity['key']}"
-                await self.db.upsert_entity(
-                    entity_id,
-                    entity["type"],
-                    entity["key"],
-                    entity["name"],
-                    now,
+                entity_rows.append(
+                    (entity_id, entity["type"], entity["key"], entity["name"], now, now)
                 )
-                await self.db.link_memory_entity(memory.id, entity_id, entity.get("role"))
-                entity_ids.add(entity_id)
-                links += 1
+                link_rows.append((memory_id, entity_id, entity.get("role")))
+                seen_entities.add(entity_id)
+        await self.db.upsert_entities_many(entity_rows)
+        await self.db.link_memory_entities_many(link_rows)
+        links = len(link_rows)
         await self.db.commit()
 
         counts = await self.db.entity_type_counts()
-        self._emit("entities_reindexed", {"entities": len(entity_ids), "links": links})
+        self._emit("entities_reindexed", {"entities": len(seen_entities), "links": links})
         return {
             "memories": len(memories),
-            "entities": len(entity_ids),
+            "entities": len(seen_entities),
             "links": links,
             "by_type": counts,
         }

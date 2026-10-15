@@ -23,7 +23,9 @@ class MemoryDedupeMixin:
         """Find groups of near-duplicate memories by embedding similarity."""
         import numpy as np
 
-        memories = await self.episodic.search(project=project, limit=10000)
+        memories = await self.episodic.search(
+            project=project, limit=10000, fetch_embeddings=True
+        )
         with_emb = [m for m in memories if m.embedding]
         groups: list[list[Memory]] = []
         used: set[str] = set()

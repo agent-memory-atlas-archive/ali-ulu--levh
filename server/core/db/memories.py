@@ -18,6 +18,22 @@ from server.core.tenancy import DEFAULT_WORKSPACE_ID, authorize, current_workspa
 
 logger = logging.getLogger(__name__)
 
+# Every stored column except ``embedding``. A column drop at the SELECT level
+# keeps heavy list reads (the fading scan decodes up to 2000 rows, the briefing
+# scan up to 10000) cheap: parsing each row's embedding blob back into floats
+# happens on the event loop thread and for a large store blocks it long enough
+# that every concurrent request stalls — the dashboard then looks like its
+# buttons are dead. Callers that genuinely need vectors ask for them explicitly
+# (``fetch_embeddings=True``).
+_MEMORY_COLUMNS_NO_EMBEDDING = (
+    "memories.id, memories.content, memories.memory_type, memories.importance, "
+    "memories.frequency, memories.tags, memories.session_id, memories.project, "
+    "memories.workspace_id, memories.source, memories.pinned, memories.metadata, "
+    "memories.hscore, memories.created_at, memories.accessed_at, "
+    "memories.decay_factor, memories.stability_hours, memories.recall_count, "
+    "memories.valid_from, memories.valid_to, memories.superseded_by"
+)
+
 
 def row_to_memory_dict(row) -> dict:
     """Decode one stored row into the mapping :class:`Memory` validates.
@@ -194,15 +210,26 @@ class MemoryQueries:
         include_superseded: bool = False,
         limit: int = 50,
         offset: int = 0,
+        fetch_embeddings: bool = True,
     ) -> list[dict]:
         self._authorize("read")
         fts_query = self._db._fts_query(content_like or "") if content_like else ""
         use_fts = bool(content_like and fts_query and self._db.fts5_available)
+        # Embeddings stay in the SELECT by default: a returned memory is
+        # expected to carry its vector, and callers do read ``.embedding`` off
+        # these rows. The heavy corpus scans (entity reindex, conflict
+        # candidates, trust, the briefing/fading reads) pass
+        # ``fetch_embeddings=False`` because they only look at content and
+        # metadata — there the blob is dead weight that gets JSON-decoded per
+        # row on the event loop (see _MEMORY_COLUMNS_NO_EMBEDDING).
+        columns = "memories.*" if fetch_embeddings else _MEMORY_COLUMNS_NO_EMBEDDING
+        # ``columns`` is one of two module-level literals, never caller input;
+        # the filter values below are all bound as `?` placeholders.
         query = (
-            "SELECT memories.* FROM memories "
+            f"SELECT {columns} FROM memories "  # nosec B608 - column list is a fixed literal, values bound
             "JOIN memories_fts ON memories_fts.memory_id = memories.id WHERE 1=1"
             if use_fts
-            else "SELECT memories.* FROM memories WHERE 1=1"
+            else f"SELECT {columns} FROM memories WHERE 1=1"  # nosec B608 - column list is a fixed literal, values bound
         )
         params: list = []
 

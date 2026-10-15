@@ -49,7 +49,8 @@ class MemoryMeetingMixin:
         now_iso = now.isoformat()
         horizon_iso = (now + timedelta(days=max(within_days, 1))).isoformat()
 
-        memories = await self.episodic.search(limit=10000)
+        # Content and metadata only — meeting detection never reads a vector.
+        memories = await self.episodic.search(limit=10000, fetch_embeddings=False)
 
         def _is_meeting(m: Memory) -> bool:
             md = m.metadata or {}

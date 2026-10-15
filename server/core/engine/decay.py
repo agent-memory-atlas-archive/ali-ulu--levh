@@ -68,7 +68,10 @@ class MemoryDecayMixin:
         """Memories whose predicted retention has dropped below `threshold` —
         the 'about to be forgotten' review queue. Pinned memories never fade.
         Returns (memory, retention) pairs, most-faded first."""
-        memories = await self.episodic.search(project=project, limit=2000)
+        # The fading scan reads decay clocks and content, never vectors.
+        memories = await self.episodic.search(
+            project=project, limit=2000, fetch_embeddings=False
+        )
         fading: list[tuple[Memory, float]] = []
         for m in memories:
             if m.pinned:

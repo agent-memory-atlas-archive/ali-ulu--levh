@@ -42,6 +42,51 @@ class TrustQueries:
             row,
         )
 
+    async def upsert_trust_many(self, rows: list[dict]) -> None:
+        """Batch form of ``upsert_trust`` — one executemany per rebuild.
+
+        A full recompute writes one row per memory; issuing those as separate
+        awaits cost one round-trip each and made the freshness-required trust
+        read crawl on a large store. Same ON CONFLICT semantics, positional
+        parameters because executemany does not take named ones.
+        """
+        if not rows:
+            return
+        await self._db.conn.executemany(
+            """
+            INSERT INTO memory_trust_scores
+                (memory_id, confidence, source_score, corroboration_score,
+                 review_score, recency_score, risk_penalty, label,
+                 computed_at, breakdown_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(memory_id) DO UPDATE SET
+                confidence=excluded.confidence,
+                source_score=excluded.source_score,
+                corroboration_score=excluded.corroboration_score,
+                review_score=excluded.review_score,
+                recency_score=excluded.recency_score,
+                risk_penalty=excluded.risk_penalty,
+                label=excluded.label,
+                computed_at=excluded.computed_at,
+                breakdown_json=excluded.breakdown_json
+            """,
+            [
+                (
+                    row["memory_id"],
+                    row["confidence"],
+                    row["source_score"],
+                    row["corroboration_score"],
+                    row["review_score"],
+                    row["recency_score"],
+                    row["risk_penalty"],
+                    row["label"],
+                    row["computed_at"],
+                    row["breakdown_json"],
+                )
+                for row in rows
+            ],
+        )
+
     async def get_trust(self, memory_id: str) -> Optional[dict]:
         cursor = await self._db.conn.execute(
             "SELECT * FROM memory_trust_scores WHERE memory_id = ?", (memory_id,)

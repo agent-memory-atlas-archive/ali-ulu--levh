@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Mapping, Optional
 
@@ -60,9 +61,13 @@ class EpisodicMemory:
         row = await self.db.get_memory(memory_id)
         return _row_to_memory(row) if row else None
 
-    async def get_all(self, limit: int = 10000, across_workspaces: bool = False) -> list[Memory]:
+    async def get_all(
+        self, limit: int = 10000, across_workspaces: bool = False
+    ) -> list[Memory]:
         rows = await self.db.get_all_memories(limit, across_workspaces=across_workspaces)
-        return [m for m in (_row_to_memory(r) for r in rows) if m]
+        return await asyncio.to_thread(
+            lambda: [m for m in (_row_to_memory(r) for r in rows) if m]
+        )
 
     async def get_after_rowid(
         self, rowid: int, limit: int = 10000
@@ -95,6 +100,7 @@ class EpisodicMemory:
         include_superseded: bool = False,
         limit: int = 50,
         offset: int = 0,
+        fetch_embeddings: bool = True,
     ) -> list[Memory]:
         rows = await self.db.search_memories(
             memory_type=memory_type,
@@ -110,8 +116,16 @@ class EpisodicMemory:
             include_superseded=include_superseded,
             limit=limit,
             offset=offset,
+            fetch_embeddings=fetch_embeddings,
         )
-        return [m for m in (_row_to_memory(r) for r in rows) if m]
+        # Row → Memory conversion (pydantic validation plus the metadata/tags
+        # JSON decode) is pure CPU over up to ten-thousand rows. On the event
+        # loop it starved every concurrent request for seconds while it ran —
+        # the dashboard's own polls made the UI feel frozen — so it runs in a
+        # worker thread and only the await points stay on the loop.
+        return await asyncio.to_thread(
+            lambda: [m for m in (_row_to_memory(r) for r in rows) if m]
+        )
 
     async def search_fts_ids(self, query: str, limit: int = 50) -> list[str]:
         """Ids matching ``query`` by full-text (FTS5) search, best first.

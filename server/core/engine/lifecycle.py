@@ -33,6 +33,10 @@ _DERIVED_RETRY_LOG_EVERY = 5
 # Long enough that a burst of writes coalesces into a single retry, short
 # enough that a write removing the cause is still followed by a fast rebuild.
 _DERIVED_RETRY_DEBOUNCE_SECONDS = 0.1
+# Cap on the passes one freshness read may run: a write landing during a pass
+# makes another necessary. Past the cap the read fails loud rather than
+# answering stale, and a write storm cannot hold the read open forever.
+_DERIVED_INLINE_MAX_PASSES = 3
 
 
 def _has_running_loop() -> bool:
@@ -166,6 +170,9 @@ class MemoryLifecycleMixin:
         rebuild attempts stay decoupled (issue #166).
         """
         self._derived_dirty = True
+        # Counts writes, not rebuilds: a pass compares this against its own
+        # start to tell whether it covered everything it ran on top of.
+        self._derived_write_count += 1
         self._derived_retry_wake.set()
         # Debt is read before the reset: only a pass that actually failed
         # needs this write to restart it (the failed pass no longer
@@ -232,16 +239,29 @@ class MemoryLifecycleMixin:
         it a write storm — every write waking the sleep — buys one full
         rebuild per write and no backoff at all (issue #166).
         """
+        # Writes that land while the steps below run are NOT covered by this
+        # pass: the rows come from a snapshot taken before them. The flag stays
+        # raised for the whole pass (so no read mistakes a half-rebuilt graph
+        # for a fresh one) and the end only clears it when nothing was written
+        # since — otherwise it survives and the successor in ``finally``
+        # rebuilds on top, instead of the write being erased by an
+        # unconditional ``_derived_dirty = False``.
+        writes_at_start = self._derived_write_count
         try:
             await self.reindex_entities()
             await self.detect_conflict_candidates()
             await self.recompute_trust_scores()
-            self._derived_dirty = False
+            self._derived_dirty = self._derived_write_count != writes_at_start
             self._derived_retry_count = 0
+            # Stamp the pass: a later freshness read compares this against the
+            # live store version to tell "nothing changed" from "a peer wrote".
+            self._derived_data_version = await self.db.data_version()
             metrics.inc("levh_derived_rebuild_total", outcome="success")
         except asyncio.CancelledError:
             raise
         except Exception:
+            # The flag is left raised for the same reason it is raised
+            # throughout a pass: these views are stale until one completes.
             metrics.inc("levh_derived_rebuild_total", outcome="failure")
             self._derived_retry_count += 1
             count = self._derived_retry_count
@@ -286,9 +306,18 @@ class MemoryLifecycleMixin:
             # retry cycle, not to inline freshness callers). The next retry
             # is scheduled by the next write (via _mark_derived_dirty) or by
             # the next stale-ok read.
+            # A freshness caller rebuilds on top of this pass itself
+            # (``recompute_derived_state`` holds ``_derived_inline_waiter`` for
+            # its whole sequence), so spawning the successor here would pay for
+            # the same rebuild twice — and, worse, land on the loop while that
+            # caller's own transaction is open: every write path shares one
+            # SQLite connection, so a background pass issuing statements
+            # mid-transaction raises "cannot start a transaction within a
+            # transaction" (same hazard as in _mark_derived_dirty).
             if (
                 self._derived_dirty
                 and not self._derived_retry_count
+                and not self._derived_inline_waiter
                 and _has_running_loop()
             ):
                 await self._ensure_derived_state()
@@ -304,14 +333,50 @@ class MemoryLifecycleMixin:
         Raises when the rebuild fails (issue #139): "return when it is
         fresh" must not silently hand back stale rows. Callers here act on
         the verdict — a loud failure beats a quiet wrong answer.
+
+        A state that is already fresh returns untouched. The flag used to be
+        raised unconditionally, so every freshness-required read paid a full
+        corpus rebuild (entity reindex -> conflict candidates -> trust) even
+        when the last pass had already covered every write: on a large store
+        the graph, trust and conflict pages answered in ~25s each, every time,
+        and a read that overlapped the startup pass waited it out and then
+        rebuilt the same thing again. "Fresh" is what this contract asks for,
+        and a clean flag plus an unchanged store version IS fresh.
         """
+        if not self._derived_dirty and await self._derived_store_unchanged():
+            return
         self._derived_dirty = True
-        await self._rebuild_derived_inline()
-        if self._derived_dirty:
-            raise RuntimeError(
-                "derived-state rebuild failed; derived views are stale "
-                "(see levh.memory_engine warnings)"
-            )
+        # Held for the whole inline sequence, so no pass in it spawns a
+        # successor: this caller rebuilds on top of the running pass itself,
+        # and a successor landing on the loop while the caller's own
+        # transaction is open hits the shared connection with "cannot start a
+        # transaction within a transaction" (see _mark_derived_dirty).
+        self._derived_inline_waiter = True
+        try:
+            for _ in range(_DERIVED_INLINE_MAX_PASSES):
+                await self._rebuild_derived_inline()
+                if not self._derived_dirty:
+                    return
+        finally:
+            self._derived_inline_waiter = False
+        raise RuntimeError(
+            "derived-state rebuild failed; derived views are stale "
+            "(see levh.memory_engine warnings)"
+        )
+
+    async def _derived_store_unchanged(self) -> bool:
+        """True when no other connection committed since the last successful
+        rebuild.
+
+        ``PRAGMA data_version`` is per-connection: this process's own writes
+        do not move it (``_derived_dirty`` covers those), a peer process's
+        commit does. The in-process flag alone cannot see the peer case, so
+        the stamp is what keeps this early return honest rather than merely
+        fast.
+        """
+        if self._derived_data_version is None:
+            return False
+        return await self.db.data_version() == self._derived_data_version
 
     async def _rebuild_derived_inline(self) -> None:
         """Inline rebuild for freshness-required callers. Serialized against a
@@ -327,6 +392,14 @@ class MemoryLifecycleMixin:
             # through recompute_derived_state's staleness check (issue #139).
             except Exception:  # noqa: BLE001 - best-effort refresh; staleness caught on next read
                 logger.exception("background derived refresh failed; inline retry follows")
+            else:
+                # The awaited pass succeeded. It cleared the flag only if no
+                # write landed while it ran, and a clean flag means this
+                # caller's answer is already fresh — rebuilding again would be
+                # a second full pass for nothing, which is what a read
+                # overlapping the startup pass used to pay.
+                if not self._derived_dirty:
+                    return
         await self._rebuild_derived(retry=False)
 
     @staticmethod

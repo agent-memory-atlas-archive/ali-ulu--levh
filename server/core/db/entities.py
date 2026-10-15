@@ -46,6 +46,41 @@ class EntityQueries:
             (memory_id, entity_id, role),
         )
 
+    async def upsert_entities_many(
+        self, rows: list[tuple[str, str, str, str, str, str]]
+    ) -> None:
+        """Batch form of ``upsert_entity`` — one executemany round-trip.
+
+        The rebuild walks every memory, so a fresh graph holds tens of
+        thousands of rows; issuing them one await at a time made the first
+        graph read after startup crawl. Same ON CONFLICT semantics as the
+        single-row insert.
+        """
+        if not rows:
+            return
+        await self._db.conn.executemany(
+            """
+            INSERT INTO entities (id, type, ekey, name, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = CASE WHEN length(excluded.name) > length(entities.name)
+                            THEN excluded.name ELSE entities.name END,
+                updated_at = excluded.updated_at
+            """,
+            rows,
+        )
+
+    async def link_memory_entities_many(
+        self, rows: list[tuple[str, str, str | None]]
+    ) -> None:
+        """Batch form of ``link_memory_entity`` (INSERT OR IGNORE)."""
+        if not rows:
+            return
+        await self._db.conn.executemany(
+            "INSERT OR IGNORE INTO memory_entities (memory_id, entity_id, role) VALUES (?, ?, ?)",
+            rows,
+        )
+
     async def list_entities(
         self, etype: Optional[str] = None, limit: int = 200
     ) -> list[dict]:

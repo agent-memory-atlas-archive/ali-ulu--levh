@@ -38,7 +38,11 @@ class MemoryBriefingMixin:
         today = now.date().isoformat()
         cutoff = (now - timedelta(days=days)).date().isoformat()
 
-        memories = await self.episodic.search(project=project, limit=10000)
+        # Content and metadata only — the briefing never reads a vector, and a
+        # 10k-row scan that decodes every embedding blob blocks the loop.
+        memories = await self.episodic.search(
+            project=project, limit=10000, fetch_embeddings=False
+        )
 
         # ── Today: memories whose event date is today ──────────────
         today_items = []

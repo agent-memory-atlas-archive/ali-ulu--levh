@@ -7,6 +7,7 @@ them to storage and the entity index without depending on ``MemoryEngine``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Callable
@@ -131,22 +132,40 @@ class TrustService:
     async def recompute_trust_scores(self) -> dict:
         """Compute and persist provenance trust scores for every memory."""
         now_iso = datetime.now(timezone.utc).isoformat()
-        memories = await self.episodic.search(limit=1_000_000)
-        entity_index = self.entity_index.build_entity_index(memories)
+        # Source/metadata only: trust never reads a vector.
+        memories = await self.episodic.search(limit=1_000_000, fetch_embeddings=False)
+        # Text-entity extraction for the whole corpus is pure CPU. Left on the
+        # event loop it stalled every concurrent request while a
+        # freshness-required read rebuilt the scores, so it runs in a worker
+        # thread; the DB writes below stay on the loop.
+        entity_index = await asyncio.to_thread(
+            self.entity_index.build_entity_index, memories
+        )
         conflict_map = await self._conflict_status_map()
 
         await self.db.clear_trust()
-        by_label: dict[str, int] = {}
-        for memory in memories:
-            breakdown = self._trust_breakdown(
-                memory,
-                entity_index,
-                now_iso,
-                conflict_map.get(memory.id),
-            )
-            await self.db.upsert_trust(self._trust_row(breakdown, now_iso))
-            label = breakdown["label"]
-            by_label[label] = by_label.get(label, 0) + 1
+
+        # Scoring every memory is pure CPU, and writing them one await at a
+        # time cost a round-trip per row. Both happen off the loop (thread +
+        # one executemany) so the freshness-required trust read — and every
+        # request queued behind it — stays responsive.
+        def _score_all() -> tuple[list[dict], dict[str, int]]:
+            rows: list[dict] = []
+            counts: dict[str, int] = {}
+            for memory in memories:
+                breakdown = self._trust_breakdown(
+                    memory,
+                    entity_index,
+                    now_iso,
+                    conflict_map.get(memory.id),
+                )
+                rows.append(self._trust_row(breakdown, now_iso))
+                label = breakdown["label"]
+                counts[label] = counts.get(label, 0) + 1
+            return rows, counts
+
+        trust_rows, by_label = await asyncio.to_thread(_score_all)
+        await self.db.upsert_trust_many(trust_rows)
         await self.db.commit()
 
         self._emit("trust_recomputed", {"scored": len(memories)})

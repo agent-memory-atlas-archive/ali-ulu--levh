@@ -12,17 +12,47 @@ from __future__ import annotations
 from .helpers import _event_date
 
 
+import asyncio
+
+
 class MemoryWorkspaceMixin:
     """People, organizations, the timeline and decisions."""
+
+    # People/orgs cached aggregates, keyed by the store's data_version. Every
+    # page load polls both endpoints; rebuilding them from ten thousand
+    # memories per request (text scanning over the whole corpus) is the kind
+    # of lag that makes the dashboard look frozen. Same semantics as the
+    # derived-state views: one cheap PRAGMA guard per read, an O(corpus)
+    # rebuild only when the data version moved.
+    _people_orgs_cache_version: int | None = None
+    _people_orgs_cache: tuple[list[dict], list[dict]] | None = None
+
+    async def _cached_people_orgs(self) -> tuple[list[dict], list[dict]]:
+        from ..people import aggregate_people
+        from ..organizations import aggregate_organizations
+
+        version = await self.db.data_version()
+        if self._people_orgs_cache_version == version and self._people_orgs_cache is not None:
+            return self._people_orgs_cache
+        # Content and metadata only: these scans aggregate people/organizations
+        # and timeline entries, and skip the embedding column so a 10k-row read
+        # does not JSON-decode vectors it never looks at.
+        memories = await self.episodic.search(limit=10000, fetch_embeddings=False)
+        # Text-entity extraction is pure CPU over the whole corpus; on the
+        # event loop it starves every concurrent request for seconds (the
+        # dashboard polls people/orgs on every page), so it runs in a worker
+        # thread and only the await points stay on the loop.
+        people = await asyncio.to_thread(aggregate_people, memories)
+        orgs = await asyncio.to_thread(aggregate_organizations, memories)
+        self._people_orgs_cache_version = version
+        self._people_orgs_cache = (people, orgs)
+        return self._people_orgs_cache
 
     async def list_people(self, limit: int = 200) -> list[dict]:
         """Distinct people mentioned across memories (calendar attendees,
         email senders/recipients, transcript speakers), most-frequent first.
         Each entry drops the internal ``memory_ids`` list for the summary view."""
-        from ..people import aggregate_people
-
-        memories = await self.episodic.search(limit=10000)
-        people = aggregate_people(memories)
+        people, _orgs = await self._cached_people_orgs()
         return [{k: v for k, v in p.items() if k != "memory_ids"} for p in people[:limit]]
 
     async def get_person(self, query: str) -> dict | None:
@@ -30,8 +60,11 @@ class MemoryWorkspaceMixin:
         memories that mention them (most recent first)."""
         from ..people import aggregate_people, find_person_key
 
-        memories = await self.episodic.search(limit=10000)
-        people = aggregate_people(memories)
+        # Content and metadata only: these scans aggregate people/organizations
+        # and timeline entries, and skip the embedding column so a 10k-row read
+        # does not JSON-decode vectors it never looks at.
+        memories = await self.episodic.search(limit=10000, fetch_embeddings=False)
+        people = await asyncio.to_thread(aggregate_people, memories)
         key = find_person_key(people, query)
         if key is None:
             return None
@@ -52,10 +85,7 @@ class MemoryWorkspaceMixin:
         senders/recipients, transcript speakers), most-frequent first. Each
         entry drops the internal ``memory_ids`` list and caps ``people`` to
         50 names so large organizations don't blow up the summary view."""
-        from ..organizations import aggregate_organizations
-
-        memories = await self.episodic.search(limit=10000)
-        orgs = aggregate_organizations(memories)
+        _people, orgs = await self._cached_people_orgs()
         result = []
         for o in orgs[:limit]:
             entry = {k: v for k, v in o.items() if k != "memory_ids"}
@@ -69,8 +99,11 @@ class MemoryWorkspaceMixin:
         first)."""
         from ..organizations import aggregate_organizations, find_org_key
 
-        memories = await self.episodic.search(limit=10000)
-        orgs = aggregate_organizations(memories)
+        # Content and metadata only: these scans aggregate people/organizations
+        # and timeline entries, and skip the embedding column so a 10k-row read
+        # does not JSON-decode vectors it never looks at.
+        memories = await self.episodic.search(limit=10000, fetch_embeddings=False)
+        orgs = await asyncio.to_thread(aggregate_organizations, memories)
         key = find_org_key(orgs, query)
         if key is None:
             return None
@@ -94,7 +127,9 @@ class MemoryWorkspaceMixin:
         most-recent-first."""
         from datetime import datetime, timedelta, timezone
 
-        memories = await self.episodic.search(project=project, limit=10000)
+        memories = await self.episodic.search(
+            project=project, limit=10000, fetch_embeddings=False
+        )
 
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
 
@@ -150,7 +185,9 @@ class MemoryWorkspaceMixin:
         now = datetime.now(timezone.utc)
         cutoff = (now - timedelta(days=days)).date().isoformat()
 
-        memories = await self.episodic.search(project=project, limit=10000)
+        memories = await self.episodic.search(
+            project=project, limit=10000, fetch_embeddings=False
+        )
 
         marker_pattern = re.compile(
             r"\bwe decided\b|\bdecided to\b|\bdecision\b|\bwe agreed\b|\bagreed to\b|"

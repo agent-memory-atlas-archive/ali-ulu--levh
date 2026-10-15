@@ -13,11 +13,17 @@ no I/O, no LLM.
 
 from __future__ import annotations
 
+import json
 import re
+from functools import lru_cache
 from typing import Any
 
 from .organizations import FREE_EMAIL_DOMAINS, domain_to_org
-from .text_entities import extract_orgs_from_text, people_in_memory
+from .text_entities import (
+    extract_orgs_from_text,
+    metadata_cache_key,
+    people_from_parts,
+)
 
 # Sources / metadata that mark a memory as a document.
 _DOCUMENT_SOURCES = ("notion", "obsidian", "local_files", "github")
@@ -86,18 +92,13 @@ def _task_text(content: str) -> str | None:
     return sentence.strip()[:160] or None
 
 
-def extract_entities(memory: Any) -> list[dict]:
-    """All typed entities referenced by one memory.
-
-    ``memory`` is duck-typed: ``.content``, ``.metadata``, ``.source``. Returns
-    a list of ``{type, key, name, role}`` dicts, de-duplicated within the memory
-    by ``(type, key)``.
-    """
-    metadata = getattr(memory, "metadata", None) or {}
+@lru_cache(maxsize=8192)
+def _extract_entities_cached(
+    content: str, metadata_key: str, source: str
+) -> tuple[dict, ...]:
+    metadata = json.loads(metadata_key) if metadata_key else {}
     if not isinstance(metadata, dict):
         metadata = {}
-    content = getattr(memory, "content", "") or ""
-    source = getattr(memory, "source", None) or ""
 
     out: list[dict] = []
     seen: set[tuple[str, str]] = set()
@@ -112,7 +113,7 @@ def extract_entities(memory: Any) -> list[dict]:
     # people + organizations — connector metadata first, then whatever the
     # content itself names (so hand-typed notes aren't entity-less).
     domain_org_labels: set[str] = set()
-    for name, email in people_in_memory(memory):
+    for name, email in people_from_parts(content, metadata, source):
         person_key = email or name.lower()
         _add("person", person_key, name, "person")
         if email:
@@ -148,4 +149,27 @@ def extract_entities(memory: Any) -> list[dict]:
     if task:
         _add("task", task, task, "task")
 
-    return out
+    return tuple(out)
+
+
+def extract_entities(memory: Any) -> list[dict]:
+    """All typed entities referenced by one memory.
+
+    ``memory`` is duck-typed: ``.content``, ``.metadata``, ``.source``. Returns
+    a list of ``{type, key, name, role}`` dicts, de-duplicated within the memory
+    by ``(type, key)``.
+
+    Cached on (content, metadata, source): one derived-state rebuild extracts
+    entities from the whole corpus several times (graph, conflicts, trust),
+    and re-running the text patterns each time is what made those reads take
+    minutes. Each caller gets fresh dicts, so nothing shared can be mutated.
+    """
+    metadata = getattr(memory, "metadata", None) or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    cached = _extract_entities_cached(
+        getattr(memory, "content", "") or "",
+        metadata_cache_key(metadata),
+        getattr(memory, "source", None) or "",
+    )
+    return [dict(entity) for entity in cached]

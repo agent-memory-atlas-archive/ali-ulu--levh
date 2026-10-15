@@ -33,6 +33,10 @@ _DERIVED_RETRY_LOG_EVERY = 5
 # Long enough that a burst of writes coalesces into a single retry, short
 # enough that a write removing the cause is still followed by a fast rebuild.
 _DERIVED_RETRY_DEBOUNCE_SECONDS = 0.1
+# Cap on the passes one freshness read may run: a write landing during a pass
+# makes another necessary. Past the cap the read fails loud rather than
+# answering stale, and a write storm cannot hold the read open forever.
+_DERIVED_INLINE_MAX_PASSES = 3
 
 
 def _has_running_loop() -> bool:
@@ -302,10 +306,14 @@ class MemoryLifecycleMixin:
             # retry cycle, not to inline freshness callers). The next retry
             # is scheduled by the next write (via _mark_derived_dirty) or by
             # the next stale-ok read.
-            # A freshness caller waiting on this pass rebuilds on top of it
-            # itself (``_rebuild_derived_inline``), so spawning the successor
-            # here would run that second pass twice — the two would interleave
-            # on the loop and both pay a full corpus rebuild for one write.
+            # A freshness caller rebuilds on top of this pass itself
+            # (``recompute_derived_state`` holds ``_derived_inline_waiter`` for
+            # its whole sequence), so spawning the successor here would pay for
+            # the same rebuild twice — and, worse, land on the loop while that
+            # caller's own transaction is open: every write path shares one
+            # SQLite connection, so a background pass issuing statements
+            # mid-transaction raises "cannot start a transaction within a
+            # transaction" (same hazard as in _mark_derived_dirty).
             if (
                 self._derived_dirty
                 and not self._derived_retry_count
@@ -338,12 +346,23 @@ class MemoryLifecycleMixin:
         if not self._derived_dirty and await self._derived_store_unchanged():
             return
         self._derived_dirty = True
-        await self._rebuild_derived_inline()
-        if self._derived_dirty:
-            raise RuntimeError(
-                "derived-state rebuild failed; derived views are stale "
-                "(see levh.memory_engine warnings)"
-            )
+        # Held for the whole inline sequence, so no pass in it spawns a
+        # successor: this caller rebuilds on top of the running pass itself,
+        # and a successor landing on the loop while the caller's own
+        # transaction is open hits the shared connection with "cannot start a
+        # transaction within a transaction" (see _mark_derived_dirty).
+        self._derived_inline_waiter = True
+        try:
+            for _ in range(_DERIVED_INLINE_MAX_PASSES):
+                await self._rebuild_derived_inline()
+                if not self._derived_dirty:
+                    return
+        finally:
+            self._derived_inline_waiter = False
+        raise RuntimeError(
+            "derived-state rebuild failed; derived views are stale "
+            "(see levh.memory_engine warnings)"
+        )
 
     async def _derived_store_unchanged(self) -> bool:
         """True when no other connection committed since the last successful
@@ -364,7 +383,6 @@ class MemoryLifecycleMixin:
         running background pass by awaiting its task first."""
         task = self._derived_task
         if task is not None and not task.done():
-            self._derived_inline_waiter = True
             try:
                 await task
             except asyncio.CancelledError:
@@ -382,8 +400,6 @@ class MemoryLifecycleMixin:
                 # overlapping the startup pass used to pay.
                 if not self._derived_dirty:
                     return
-            finally:
-                self._derived_inline_waiter = False
         await self._rebuild_derived(retry=False)
 
     @staticmethod

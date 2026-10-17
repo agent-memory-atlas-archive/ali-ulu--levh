@@ -224,6 +224,48 @@ def test_slow_child_gets_patience_before_a_restart(cfg, make):
     assert "health probe missed (4/3)" not in _log(cfg)
 
 
+def _scripted(supervisor, monkeypatch, outcomes):
+    """Make healthy() replay ``outcomes`` (True = ok); the last one repeats."""
+    queue = list(outcomes)
+    monkeypatch.setattr(supervisor, "healthy", lambda: queue.pop(0) if len(queue) > 1 else queue[0])
+
+
+def test_flapping_child_is_restarted_even_though_good_probes_interleave(cfg, make, monkeypatch):
+    supervisor = make(cfg, command=SLEEPER)
+    _scripted(supervisor, monkeypatch, [False] * 6 + [True] + [False] * 6 + [True])
+    child = supervisor.start_child()
+    supervisor.watch_child(child)
+    assert child.poll() is not None, "flapping child must be killed"
+    assert "flapping" in _log(cfg)
+
+
+def test_one_isolated_slow_probe_among_healthy_ones_does_not_restart(cfg, make):
+    supervisor = make(cfg, command=SLEEPER)
+    child = supervisor.start_child()
+    script = [True, True, False, True, True, True, True, True]
+
+    def probe() -> bool:
+        if not script:
+            child.kill()  # script over: end the watch without any restart verdict
+            return True
+        return script.pop(0)
+
+    supervisor.healthy = probe  # type: ignore[method-assign]
+    supervisor.watch_child(child)
+    log = _log(cfg)
+    assert "flapping" not in log and "unresponsive" not in log
+    assert "EXITED" in log
+
+
+def test_consecutive_misses_without_a_good_probe_are_not_flapping(cfg, make):
+    supervisor = make(replace(cfg, max_failed_probes=8), command=SLEEPER, healthy=False)
+    child = supervisor.start_child()
+    supervisor.watch_child(child)
+    log = _log(cfg)
+    assert "missed (7/8)" in log and "flapping" not in log
+    assert "unresponsive" in log
+
+
 def test_young_child_is_not_judged_during_boot_grace(cfg, make):
     config = replace(cfg, boot_grace_s=3600, max_failed_probes=1)
     supervisor = make(config, command=QUICK_EXIT, healthy=False)

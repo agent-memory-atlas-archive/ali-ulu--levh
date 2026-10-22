@@ -13,6 +13,11 @@
 
 - TBD
 
+### fix: make the pip-debris recovery reachable without a working pip (#524)
+
+- An interrupted `levh update` (a killed supervisor, a reboot, a locked file) can leave `~`-prefixed remnants in the interpreter's `site-packages`, which wedges `pip install`, `pip uninstall` and `pip show` in that interpreter — so the documented recovery step (a `pip install`) was itself blocked by the breakage. `levh doctor` already reported the remnants (with the move command) and `levh update` clears them before installing.
+- `levh doctor --fix-debris` now performs that move itself: the remnants go to a `levh-pip-debris-backup-*` directory beside `site-packages`, nothing is deleted, and the report names where they went. This needs no working pip, which is the point.
+- Documented in `docs/installation.md` ("pip is wedged after an interrupted update") and `docs/cli.md`.
 ### fix: surface a stalled auto-update instead of only logging it (#522)
 
 - The supervisor skipped an update it could not apply safely (a checkout on another branch, local edits, a diverged history) and recorded that only in its own log, so the server ran an increasingly stale commit while `/api/health`, `levh doctor` and the dashboard all reported healthy. Each cycle is now written to `update-state.json` in the supervisor log directory and read back by every surface.

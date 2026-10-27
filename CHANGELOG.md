@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### feat: add cross-entity search to the command palette (#564)
+
+- The ⌘K palette searched memories only, so an entity, project or session the user knew by name was unreachable from the keyboard. A query now fans out across four sources — memories (recall), entities (`/api/entities/search`), projects and sessions — and each hit is grouped under a labelled section. An entity row deep-links to `/graph/?q=<name>`, a project row to `/memories/?project=<name>`, a session row to `/memories/?session=<id>`; memory rows keep the existing content-query link. The calls settle independently (`Promise.allSettled`), so a missing entity index does not blank the memory hits, and the "search failed" state only appears when every source rejected.
+
+### feat: search entities by name on the graph page (#560)
+
+- The graph page offered a type filter and nothing else, so finding one entity in a large graph meant scrolling. A debounced search box now narrows the list by name and carries the query in the URL (`/graph/?q=…&type=…`), so a filtered view can be shared and survives a reload. A query that matches nothing shows a "no match" message naming the term rather than the generic empty state.
+
+### feat: add GET /api/entities/search for the graph page (#569)
+
+- `GET /api/entities` gains `offset` and `q` (case-insensitive substring over the name or entity key), and a thin alias `GET /api/entities/search` exposes the same query under a search-shaped path for the graph page. The literal path is registered above the `/api/entities/{entity_id}` catch-all for the same reason `/stats` is. Existing callers are unchanged: `offset` defaults to 0 and an absent `q` filters nothing.
+
 ### feat: add a toast surface for API failures and user actions (#555)
 
 - A failed write used to disappear into `console.error` — the pin, delete, save, reinforce and mark-stale paths on the memories page and the detail drawer all swallowed their errors. A new `components/ui/toast.tsx` renders a portal-based stack with success/error/info variants, and every one of those call sites now reports success or the server's message. The store lives outside React (`useSyncExternalStore`) because it is called from non-component code; the live region is `aria-live="polite"` so a screen reader hears the outcome.
